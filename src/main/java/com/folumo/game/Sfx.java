@@ -1,12 +1,11 @@
 package com.folumo.game;
 
 import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.SourceDataLine;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
+import java.nio.file.Path;
+import java.util.*;
 import java.util.function.Supplier;
 
 /** Sound effects synthesised in code (no audio files), mixed on one audio thread so rapid clicks never lag. */
@@ -36,7 +35,57 @@ final class Sfx {
     }
 
     private final List<Voice> voices = new ArrayList<>();
+    private final Map<Sound, float[]> replaced = new EnumMap<>(Sound.class);
     private volatile float gain = .5f;
+
+    /**
+     * Replaces a built-in sound with a mod's WAV file.
+     * @param name sound name such as "gather" (case-insensitive)
+     * @throws IllegalArgumentException for an unknown name or an unreadable / unsupported file
+     */
+    void replace(String name, Path wav) {
+        Sound s;
+        try {
+            s = Sound.valueOf(name.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("unknown sound '" + name + "' (use one of: "
+                    + Arrays.stream(Sound.values()).map(x -> x.name().toLowerCase(Locale.ROOT)).toList() + ")");
+        }
+        float[] data = readWav(wav);
+        synchronized (voices) {
+            replaced.put(s, data);
+        }
+    }
+
+    /** 16-bit (or 8-bit) PCM WAV at 44100 Hz, mono or stereo, read as mono samples in -1..1. */
+    static float[] readWav(Path file) {
+        try (AudioInputStream in = AudioSystem.getAudioInputStream(file.toFile())) {
+            AudioFormat src = in.getFormat();
+            if (Math.abs(src.getSampleRate() - RATE) > 1)
+                throw new IllegalArgumentException(file.getFileName() + " must be 44100 Hz, not " + (int) src.getSampleRate() + " Hz");
+            int ch = src.getChannels();
+            AudioFormat pcm = new AudioFormat(RATE, 16, ch, true, false);
+            byte[] b;
+            try (AudioInputStream conv = AudioSystem.getAudioInputStream(pcm, in)) {
+                b = conv.readAllBytes();
+            }
+            float[] out = new float[b.length / 2 / ch];
+            for (int i = 0; i < out.length; i++) {
+                float sum = 0;
+                for (int c = 0; c < ch; c++) {
+                    int k = (i * ch + c) * 2;
+                    sum += (short) ((b[k] & 0xff) | (b[k + 1] << 8)) / 32768f;
+                }
+                out[i] = sum / ch; // stereo is mixed down to mono
+            }
+            if (out.length < 2) throw new IllegalArgumentException(file.getFileName() + " is empty");
+            return out;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException(file.getFileName() + " can't be read (" + e.getMessage() + "); use a 16-bit PCM WAV at 44100 Hz");
+        }
+    }
 
     Sfx() {
         Thread t = new Thread(this::run, "sfx");
@@ -58,7 +107,7 @@ final class Sfx {
     void play(Sound s, double pitch) {
         if (gain <= 0) return;
         synchronized (voices) {
-            if (voices.size() < 16) voices.add(new Voice(s.data, pitch));
+            if (voices.size() < 16) voices.add(new Voice(replaced.getOrDefault(s, s.data), pitch));
         }
     }
 

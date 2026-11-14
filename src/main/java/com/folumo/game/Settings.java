@@ -1,5 +1,6 @@
 package com.folumo.game;
 
+import com.folumo.tree.I18n;
 import com.folumo.tree.Tree;
 
 import java.io.IOException;
@@ -14,6 +15,7 @@ final class Settings {
     boolean sound = true;
     int volume = 70; // 0..100
     boolean popups = true;
+    String language = I18n.systemLanguage();
 
     static Settings load(Path file) {
         Settings s = new Settings();
@@ -23,6 +25,8 @@ final class Settings {
             s.sound = Boolean.parseBoolean(p.getProperty("sound", "true").trim());
             s.volume = Math.max(0, Math.min(100, Integer.parseInt(p.getProperty("volume", "70").trim())));
             s.popups = Boolean.parseBoolean(p.getProperty("popups", "true").trim());
+            String lang = p.getProperty("language", s.language).trim();
+            s.language = I18n.LANGUAGES.contains(lang) ? lang : s.language;
         } catch (Exception e) {
             System.err.println("Ignoring unreadable settings (" + file + "): " + e.getMessage());
             return new Settings();
@@ -35,6 +39,7 @@ final class Settings {
         p.setProperty("sound", Boolean.toString(sound));
         p.setProperty("volume", Integer.toString(volume));
         p.setProperty("popups", Boolean.toString(popups));
+        p.setProperty("language", language);
         Tree.store(p, file, "Dopamin Rush settings");
     }
 }

@@ -14,11 +14,17 @@
 - [x] After every 30 minutes of play (30 min, 1 h, 1 h 30, …), a card on the left side of the game window kindly suggests a break. It closes with "Okay" or hides by itself after a minute.
 
 ## Mods
-- [ ] Add an optional `mods/` folder where the community can make their own mods and expansions. For example, a mod could add extra nodes or whole new branches to the tree, or change texts, sounds or translations.
-- [ ] Load mods when the game starts. A broken mod should show an error and be skipped instead of crashing the game.
-- [ ] Write a short guide on how to make a mod. The tree editor can already be used to build mod trees.
+- [x] Optional `mods/` folder next to `tree.properties`. Mods can add nodes or whole branches, change any key of existing nodes, and replace sound effects. Translations come once i18n is done.
+- [x] Mods load at startup in alphabetical order. A broken mod is skipped and listed in a warning. Settings shows the loaded mods and has an "Open mods folder" button.
+- [x] Guide: [MODDING.md](MODDING.md), with an example mod in [docs/example-mod](docs/example-mod).
+- [ ] Let the tree editor open the main tree plus a mod, so modders can link to main-tree nodes visually and save only the mod's part.
+- [x] Mods can translate their nodes (or the main tree) with `tree_<lang>.properties`.
 
 ## Localisation (i18n)
-- [ ] Move all UI text into translation files (Java `ResourceBundle`).
-- [ ] Make the tree content (node names and descriptions) translatable too.
-- [ ] Add a language picker in Settings.
+- [x] All game UI text is in `src/main/resources/i18n/messages_<lang>.properties`: English, Croatian, German, Spanish and Portuguese. Croatian uses its three plural forms (1 sat, 2 sata, 5 sati).
+- [x] The tree is translated in `tree_<lang>.properties` next to `tree.properties` (names, descriptions, currency). A test fails if a language is missing a node or UI text.
+- [x] Language picker in Settings. It restarts the game to switch. The default is the system language if supported, otherwise English.
+- [x] The ending looks for `ending_<lang>.mp4` and `credits_<lang>.txt` first, then falls back to `ending.mp4` and `credits.txt`.
+- [ ] Have native speakers proofread the four translations. They were written by Claude.
+- [ ] Translated credits (`credits_hr.txt`, …) once the real names are in `credits.txt`.
+- [ ] The tree editor is still English only (it's a tool for creators, not players).

@@ -63,7 +63,10 @@ public final class Tree {
     }
 
     public static Tree load(Path file) throws IOException {
-        Properties p = read(file);
+        return fromProperties(read(file));
+    }
+
+    public static Tree fromProperties(Properties p) {
         Tree t = new Tree();
         t.currency = p.getProperty("currency", t.currency);
         for (String id : split(p.getProperty("nodes", ""))) {

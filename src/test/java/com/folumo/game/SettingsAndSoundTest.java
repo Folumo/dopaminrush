@@ -29,6 +29,27 @@ class SettingsAndSoundTest {
     }
 
     @Test
+    void modSoundsLoadFromWav(@TempDir Path dir) throws Exception {
+        // stereo 16-bit WAV: left full, right silent -> mono at half volume
+        byte[] pcm = new byte[100 * 4];
+        for (int i = 0; i < 100; i++) {
+            pcm[i * 4] = (byte) 0xff;
+            pcm[i * 4 + 1] = 0x3f; // 0x3fff ≈ 0.5
+        }
+        javax.sound.sampled.AudioFormat fmt = new javax.sound.sampled.AudioFormat(44100, 16, 2, true, false);
+        Path wav = dir.resolve("gather.wav");
+        javax.sound.sampled.AudioSystem.write(new javax.sound.sampled.AudioInputStream(new java.io.ByteArrayInputStream(pcm), fmt, 100),
+                javax.sound.sampled.AudioFileFormat.Type.WAVE, wav.toFile());
+
+        float[] data = Sfx.readWav(wav);
+        assertEquals(100, data.length);
+        assertEquals(.25, data[0], .01);
+
+        Files.writeString(dir.resolve("bad.wav"), "nope");
+        assertThrows(IllegalArgumentException.class, () -> Sfx.readWav(dir.resolve("bad.wav")));
+    }
+
+    @Test
     void soundsAreAudibleAndNeverClip() {
         for (Sfx.Sound s : Sfx.Sound.values()) {
             float peak = 0;

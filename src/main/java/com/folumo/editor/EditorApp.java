@@ -71,6 +71,7 @@ public final class EditorApp {
         frame.add(canvas, BorderLayout.CENTER);
         frame.add(form(), BorderLayout.EAST);
         frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        frame.setIconImages(com.folumo.tree.GameIcon.images());
         frame.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {

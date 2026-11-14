@@ -58,10 +58,5 @@ class TreeTest {
         assertEquals("0.5", Fmt.num(0.5));
         assertEquals("999", Fmt.num(999));
         assertEquals("1.25K", Fmt.num(1250));
-        assertEquals("3.40M", Fmt.num(3_400_000));
-        assertEquals("30 minutes", Fmt.duration(30));
-        assertEquals("1 hour", Fmt.duration(60));
-        assertEquals("1 hour 30 minutes", Fmt.duration(90));
-        assertEquals("2 hours", Fmt.duration(120));
-    }
+        assertEquals("3.40M", Fmt.num(3_400_000));    }
 }

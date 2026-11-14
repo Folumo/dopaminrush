@@ -21,13 +21,13 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.folumo.tree.I18n.t;
+
 /**
  * The ending, played after buying the final node: zoom out over the whole tree, play the video
  * inside the window, roll the credits, then let the player continue or be reborn.
  */
 final class Ending {
-    private static final List<String> DEFAULT_CREDITS = List.of("# Dopamin Rush", "", "Thanks for playing.");
-
     private final JFrame frame;
     private final TreeCanvas canvas;
     private final Path video, credits;
@@ -110,12 +110,13 @@ final class Ending {
     }
 
     private void rollCredits() {
+        List<String> fallback = List.of("# Dopamin Rush", "", t("ending.thanks"));
         List<String> lines;
         try {
-            lines = Files.exists(credits) ? Files.readAllLines(credits, StandardCharsets.UTF_8) : DEFAULT_CREDITS;
+            lines = Files.exists(credits) ? Files.readAllLines(credits, StandardCharsets.UTF_8) : fallback;
         } catch (Exception e) {
             System.err.println("Couldn't read credits: " + e.getMessage());
-            lines = DEFAULT_CREDITS;
+            lines = fallback;
         }
         Credits roll = new Credits(lines, this::showChoice);
         overlay.setOpaque(true);
@@ -127,12 +128,11 @@ final class Ending {
 
     private void showChoice(Credits roll) {
         Theme.Card card = new Theme.Card();
-        JLabel title = Theme.label("What now?", Theme.H2, Color.WHITE);
-        JLabel text = Theme.label("<html><div style='width:320px'>You can keep playing this run, or be <b>reborn</b>: "
-                + "start again from a single molecule, but everything you earn is multiplied by <b>×"
-                + Fmt.num(nextMultiplier) + "</b>, forever.</div></html>", Theme.BODY, Theme.TEXT);
-        JButton keep = Theme.button("Continue playing", new Color(0x374151));
-        JButton reborn = Theme.button("Get reborn  (×" + Fmt.num(nextMultiplier) + ")", Theme.GOLD.darker());
+        JLabel title = Theme.label(t("ending.title"), Theme.H2, Color.WHITE);
+        JLabel text = Theme.label("<html><div style='width:320px'>" + t("ending.text", Fmt.num(nextMultiplier)) + "</div></html>",
+                Theme.BODY, Theme.TEXT);
+        JButton keep = Theme.button(t("ending.continue"), new Color(0x374151));
+        JButton reborn = Theme.button(t("ending.reborn", Fmt.num(nextMultiplier)), Theme.GOLD.darker());
         keep.addActionListener(e -> close(onContinue));
         reborn.addActionListener(e -> close(onReborn));
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));

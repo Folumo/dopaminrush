@@ -158,8 +158,8 @@ public class TreeCanvas extends JPanel {
         Node n = nodeAt(e.getPoint());
         if (n == null) return null;
         return "<html><b>" + esc(n.name) + "</b><br>" + esc(n.description).replace("\n", "<br>")
-                + "<br><i>+" + Fmt.num(n.income) + " " + esc(tree.currency) + "/s, +"
-                + Fmt.num(n.clickBonus) + " per click</i></html>";
+                + "<br><i>" + esc(I18n.t("info.perSecond", Fmt.num(n.income), tree.currency)) + ", "
+                + esc(I18n.t("info.perClick", Fmt.num(n.clickBonus))) + "</i></html>";
     }
 
     /** {minX, maxX, minY, maxY} of all node centres (all 0 for an empty tree). */

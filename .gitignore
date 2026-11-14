@@ -42,3 +42,6 @@ bin/
 .DS_Store
 ### Game progress ###
 *.save*
+
+### Local mods (community mods live in players' own mods folder) ###
+/mods/
