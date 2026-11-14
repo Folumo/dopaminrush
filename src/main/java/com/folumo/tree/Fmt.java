@@ -8,6 +8,14 @@ public final class Fmt {
 
     private Fmt() {}
 
+    /** 30 → "30 minutes", 60 → "1 hour", 90 → "1 hour 30 minutes". */
+    public static String duration(int minutes) {
+        int h = minutes / 60, m = minutes % 60;
+        String hours = h == 0 ? "" : h + (h == 1 ? " hour" : " hours");
+        String mins = m == 0 ? "" : m + (m == 1 ? " minute" : " minutes");
+        return hours.isEmpty() ? mins : mins.isEmpty() ? hours : hours + " " + mins;
+    }
+
     public static String num(double v) {
         int i = 0;
         while (Math.abs(v) >= 1000 && i < UNITS.length - 1) {

@@ -15,17 +15,32 @@ public final class GameState {
     public final Tree tree;
     public double points;
     public final Set<String> owned = new HashSet<>();
+    public int rebirths;
+
+    /** Extra multiplier on all income and clicks earned per rebirth: 1 rebirth = x2, 2 = x3, ... */
+    public static final double REBIRTH_BONUS = 1.0;
 
     public GameState(Tree tree) {
         this.tree = tree;
     }
 
+    public double multiplier() {
+        return 1 + rebirths * REBIRTH_BONUS;
+    }
+
     public double income() {
-        return owned.stream().mapToDouble(id -> tree.nodes.get(id).income).sum();
+        return owned.stream().mapToDouble(id -> tree.nodes.get(id).income).sum() * multiplier();
     }
 
     public double clickValue() {
-        return 1 + owned.stream().mapToDouble(id -> tree.nodes.get(id).clickBonus).sum();
+        return (1 + owned.stream().mapToDouble(id -> tree.nodes.get(id).clickBonus).sum()) * multiplier();
+    }
+
+    /** Start the tree over, keeping a permanent bonus. */
+    public void reborn() {
+        rebirths++;
+        points = 0;
+        owned.clear();
     }
 
     public boolean unlocked(Node n) {
@@ -55,6 +70,7 @@ public final class GameState {
         Properties p = new Properties();
         p.setProperty("points", Double.toString(points));
         p.setProperty("owned", String.join(",", owned));
+        p.setProperty("rebirths", Integer.toString(rebirths));
         p.setProperty("time", Long.toString(System.currentTimeMillis()));
         Tree.store(p, file, "Game progress");
     }
@@ -67,6 +83,7 @@ public final class GameState {
         s.points = Tree.num(p, "points");
         s.owned.addAll(Tree.split(p.getProperty("owned", "")));
         s.owned.retainAll(tree.nodes.keySet()); // nodes may have been deleted in the editor since
+        s.rebirths = Math.max(0, (int) Tree.num(p, "rebirths"));
         long away = System.currentTimeMillis() - (long) Tree.num(p, "time");
         s.tick(Math.max(0, away) / 1000.0);
         return s;

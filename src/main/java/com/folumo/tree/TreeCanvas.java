@@ -98,6 +98,7 @@ public class TreeCanvas extends JPanel {
     public void setTree(Tree tree) {
         this.tree = tree;
         selected = null;
+        zoom = 1;
         centered = false;
         repaint();
     }
@@ -161,18 +162,47 @@ public class TreeCanvas extends JPanel {
                 + Fmt.num(n.clickBonus) + " per click</i></html>";
     }
 
-    private void centerView() {
-        double minX = 0, maxX = 0, minY = 0, maxY = 0;
+    /** {minX, maxX, minY, maxY} of all node centres (all 0 for an empty tree). */
+    private double[] treeBounds() {
+        double[] b = {0, 0, 0, 0};
         boolean first = true;
         for (Node n : tree.nodes.values()) {
-            minX = first ? n.x : Math.min(minX, n.x);
-            maxX = first ? n.x : Math.max(maxX, n.x);
-            minY = first ? n.y : Math.min(minY, n.y);
-            maxY = first ? n.y : Math.max(maxY, n.y);
+            b[0] = first ? n.x : Math.min(b[0], n.x);
+            b[1] = first ? n.x : Math.max(b[1], n.x);
+            b[2] = first ? n.y : Math.min(b[2], n.y);
+            b[3] = first ? n.y : Math.max(b[3], n.y);
             first = false;
         }
-        offX = getWidth() / 2.0 - (minX + maxX) / 2 * zoom;
-        offY = Math.max(getHeight() / 2.0 - (minY + maxY) / 2 * zoom, 230 - minY * zoom); // tall trees open at the top, below the HUD
+        return b;
+    }
+
+    private void centerView() {
+        double[] b = treeBounds();
+        offX = getWidth() / 2.0 - (b[0] + b[1]) / 2 * zoom;
+        offY = Math.max(getHeight() / 2.0 - (b[2] + b[3]) / 2 * zoom, 230 - b[2] * zoom); // tall trees open at the top, below the HUD
+    }
+
+    /** Smoothly zooms out until the whole tree fits the view, then runs {@code done}. */
+    public void zoomToFit(Runnable done) {
+        double[] b = treeBounds();
+        double pad = 140;
+        double tz = Math.min(1.5, Math.min(getWidth() / (b[1] - b[0] + pad * 2), getHeight() / (b[3] - b[2] + pad * 2)));
+        double tx = getWidth() / 2.0 - (b[0] + b[1]) / 2 * tz, ty = getHeight() / 2.0 - (b[2] + b[3]) / 2 * tz;
+        double z0 = zoom, x0 = offX, y0 = offY, seconds = 3;
+        long start = System.nanoTime();
+        Timer t = new Timer(16, null);
+        t.addActionListener(e -> {
+            double p = Math.min(1, (System.nanoTime() - start) / 1e9 / seconds), k = 1 - Math.pow(1 - p, 3); // ease out
+            zoom = z0 + (tz - z0) * k;
+            offX = x0 + (tx - x0) * k;
+            offY = y0 + (ty - y0) * k;
+            repaint();
+            if (p >= 1) {
+                t.stop();
+                done.run();
+            }
+        });
+        t.start();
     }
 
     @Override
@@ -320,8 +350,8 @@ public class TreeCanvas extends JPanel {
     private static String clip(Graphics2D g, String s, int max) {
         FontMetrics fm = g.getFontMetrics();
         if (fm.stringWidth(s) <= max) return s;
-        while (!s.isEmpty() && fm.stringWidth(s + "…") > max) s = s.substring(0, s.length() - 1);
-        return s + "…";
+        while (!s.isEmpty() && fm.stringWidth(s + "â€¦") > max) s = s.substring(0, s.length() - 1);
+        return s + "â€¦";
     }
 
     private static float mod(float a, float m) {

@@ -50,6 +50,25 @@ class GameStateTest {
     }
 
     @Test
+    void rebornKeepsABonus(@TempDir Path dir) throws Exception {
+        GameState s = new GameState(tree);
+        s.points = 500;
+        s.owned.add(root.id);
+        s.reborn();
+        assertEquals(0, s.points);
+        assertTrue(s.owned.isEmpty());
+        assertEquals(1, s.rebirths);
+        s.click();
+        assertEquals(2, s.points, "1 per click, doubled by the first rebirth");
+        s.owned.add(root.id);
+        assertEquals(4, s.income(), "root's 2/s doubled");
+
+        Path f = dir.resolve("r.save");
+        s.save(f);
+        assertEquals(1, GameState.load(tree, f).rebirths);
+    }
+
+    @Test
     void saveLoadKeepsProgress(@TempDir Path dir) throws Exception {
         GameState s = new GameState(tree);
         s.points = 42;

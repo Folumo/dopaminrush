@@ -31,6 +31,10 @@ public final class GameApp {
     private final JLabel infoBody = Theme.label("", Theme.BODY, Theme.TEXT);
     private final JButton buy = Theme.button("Buy", Theme.ACCENT);
 
+    private final Settings settings = Settings.load(Settings.FILE);
+    private final Sfx sfx = new Sfx();
+    private final JPanel settingsLayer = new JPanel(new GridBagLayout());
+
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
             Path treeFile = Path.of(args.length > 0 ? args[0] : "tree.properties");
@@ -64,6 +68,8 @@ public final class GameApp {
         canvas.edgeColor = (from, to) -> !state.owned.contains(from.id) ? null
                 : state.owned.contains(to.id) ? Theme.GREEN : Theme.mix(Theme.ACCENT, Theme.BG, .35);
         canvas.onPress = (n, e) -> {
+            if (n != null && n != canvas.selected) sfx.play(Sfx.Sound.SELECT);
+            if (n != null) settingsLayer.setVisible(false); // info card and settings never overlap
             canvas.selected = n;
             if (n != null && e.getClickCount() == 2) tryBuy(n);
             refresh();
@@ -73,6 +79,11 @@ public final class GameApp {
         canvas.add(hud(), BorderLayout.NORTH);
         canvas.add(infoCard(), BorderLayout.EAST);
         canvas.add(bottomBar(), BorderLayout.SOUTH);
+        canvas.add(settingsPanel(), BorderLayout.CENTER);
+        canvas.add(breakReminder(), BorderLayout.WEST);
+        canvas.registerKeyboardAction(e -> toggleSettings(),
+                KeyStroke.getKeyStroke("ESCAPE"), JComponent.WHEN_IN_FOCUSED_WINDOW);
+        applySound();
 
         frame.setTitle(base);
         frame.setContentPane(canvas);
@@ -80,12 +91,7 @@ public final class GameApp {
         frame.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                try {
-                    state.save(saveFile);
-                } catch (Exception ex) {
-                    JOptionPane.showMessageDialog(frame, "Couldn't save progress:\n" + ex.getMessage(), "Game", JOptionPane.ERROR_MESSAGE);
-                }
-                System.exit(0);
+                exit();
             }
         });
 
@@ -119,6 +125,40 @@ public final class GameApp {
         return floating(new FlowLayout(FlowLayout.CENTER, 0, 16), card);
     }
 
+    /** Every 30 minutes of play, a card on the left kindly suggests a break. */
+    private JComponent breakReminder() {
+        Theme.Card card = new Theme.Card();
+        JLabel title = Theme.label("Time for a little break", Theme.H2, Theme.GOLD);
+        JLabel body = Theme.label("", Theme.BODY, Theme.TEXT);
+        JButton ok = Theme.button("Okay", Theme.ACCENT);
+        for (JComponent c : new JComponent[]{title, body, ok}) {
+            c.setAlignmentX(Component.LEFT_ALIGNMENT);
+            card.add(c);
+            card.add(Box.createVerticalStrut(12));
+        }
+        JPanel wrap = new JPanel(new BorderLayout());
+        wrap.setOpaque(false);
+        wrap.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 0));
+        wrap.add(card, BorderLayout.NORTH);
+        card.setVisible(false);
+
+        Timer hide = new Timer(60_000, e -> card.setVisible(false));
+        hide.setRepeats(false);
+        ok.addActionListener(e -> card.setVisible(false));
+        int every = 30; // minutes
+        int[] played = {0};
+        new Timer(every * 60_000, e -> {
+            played[0] += every;
+            body.setText("<html><div style='width:220px'>You've been playing for <b>" + Fmt.duration(played[0])
+                    + "</b>.<br><br>It's for your own good: stand up, stretch, drink some water and look out of a window."
+                    + "<br><br>Your dopamine will still be here when you get back.</div></html>");
+            card.setVisible(true);
+            sfx.play(Sfx.Sound.BUY_IMPORTANT);
+            hide.restart();
+        }).start();
+        return wrap;
+    }
+
     private JComponent infoCard() {
         buy.addActionListener(e -> { if (canvas.selected != null) tryBuy(canvas.selected); });
         for (JComponent c : new JComponent[]{infoName, infoBody, buy}) {
@@ -138,21 +178,142 @@ public final class GameApp {
         gather.setBorder(BorderFactory.createEmptyBorder(16, 40, 16, 40));
         gather.addActionListener(e -> {
             state.click();
+            sfx.play(Sfx.Sound.GATHER, .9 + Math.random() * .25);
             Point at = SwingUtilities.convertPoint(gather, gather.getWidth() / 2 + (int) (Math.random() * 80 - 40), 0, canvas);
-            canvas.pop("+" + Fmt.num(state.clickValue()), at, Theme.GOLD);
+            if (settings.popups) canvas.pop("+" + Fmt.num(state.clickValue()), at, Theme.GOLD);
             refresh();
         });
-        JButton reset = Theme.button("Reset", new Color(0x374151));
+        JButton open = Theme.button("Settings", new Color(0x374151));
+        open.addActionListener(e -> toggleSettings());
+        JPanel bar = floating(new FlowLayout(FlowLayout.CENTER, 16, 20), gather);
+        bar.add(open);
+        return bar;
+    }
+
+    private JComponent settingsPanel() {
+        Theme.Card card = new Theme.Card();
+        JCheckBox sound = check("Sound effects", settings.sound);
+        JSlider volume = new JSlider(0, 100, settings.volume);
+        volume.setOpaque(false);
+        volume.setEnabled(settings.sound);
+        JCheckBox popups = check("Floating numbers", settings.popups);
+
+        sound.addActionListener(e -> {
+            settings.sound = sound.isSelected();
+            volume.setEnabled(settings.sound);
+            applySound();
+            sfx.play(Sfx.Sound.SELECT);
+            saveSettings();
+        });
+        volume.addChangeListener(e -> {
+            settings.volume = volume.getValue();
+            applySound();
+            if (!volume.getValueIsAdjusting()) { // play a sample at the new volume once the slider is let go
+                sfx.play(Sfx.Sound.BUY);
+                saveSettings();
+            }
+        });
+        popups.addActionListener(e -> {
+            settings.popups = popups.isSelected();
+            saveSettings();
+        });
+        JButton reset = Theme.button("Reset progress", Theme.RED.darker());
         reset.addActionListener(e -> {
-            if (JOptionPane.showConfirmDialog(frame, "Start over from zero?", "Reset", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+            String typed = JOptionPane.showInputDialog(frame,
+                    "This deletes ALL your progress and can't be undone.\nType RESET to confirm:",
+                    "Reset progress", JOptionPane.WARNING_MESSAGE);
+            if (typed == null) return; // cancelled
+            if (!typed.trim().equals("RESET")) {
+                sfx.play(Sfx.Sound.DENIED);
+                JOptionPane.showMessageDialog(frame, "Nothing was reset.", "Reset progress", JOptionPane.INFORMATION_MESSAGE);
+            } else {
                 state = new GameState(state.tree);
                 canvas.selected = null;
+                settingsLayer.setVisible(false);
                 refresh();
             }
         });
-        JPanel bar = floating(new FlowLayout(FlowLayout.CENTER, 16, 20), gather);
-        bar.add(reset);
-        return bar;
+        JButton save = Theme.button("Save game", Theme.GREEN.darker());
+        save.addActionListener(e -> {
+            if (!saveProgress()) return;
+            sfx.play(Sfx.Sound.BUY);
+            canvas.pop("Saved!", SwingUtilities.convertPoint(save, save.getWidth() / 2, 0, canvas), Theme.GREEN);
+        });
+        JButton exit = Theme.button("Save and exit", new Color(0x374151));
+        exit.addActionListener(e -> exit());
+        JButton close = Theme.button("Close", Theme.ACCENT);
+        close.addActionListener(e -> settingsLayer.setVisible(false));
+
+        JComponent[] rows = {Theme.label("Settings", Theme.H2, Color.WHITE), sound,
+                Theme.label("Volume", Theme.BODY, Theme.MUTED), volume, popups,
+                row(save, exit), row(reset, close)};
+        JComponent width = (JComponent) Box.createRigidArea(new Dimension(300, 0));
+        width.setAlignmentX(Component.LEFT_ALIGNMENT); // mixed alignments make BoxLayout shift everything
+        card.add(width);
+        for (JComponent c : rows) {
+            c.setAlignmentX(Component.LEFT_ALIGNMENT);
+            card.add(c);
+            card.add(Box.createVerticalStrut(c == popups ? 22 : 10));
+        }
+        settingsLayer.setOpaque(false);
+        settingsLayer.add(card);
+        settingsLayer.setVisible(false);
+        return settingsLayer;
+    }
+
+    private static JPanel row(JComponent... items) {
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        p.setOpaque(false);
+        for (JComponent c : items) {
+            if (p.getComponentCount() > 0) p.add(Box.createHorizontalStrut(10));
+            p.add(c);
+        }
+        return p;
+    }
+
+    /** Opening settings closes the node info card so the two don't overlap. */
+    private void toggleSettings() {
+        boolean open = !settingsLayer.isVisible();
+        if (open) canvas.selected = null;
+        settingsLayer.setVisible(open);
+        refresh();
+    }
+
+    /** @return true if saved; shows the error otherwise */
+    private boolean saveProgress() {
+        try {
+            state.save(saveFile);
+            return true;
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(frame, "Couldn't save progress:\n" + ex.getMessage(), "Game", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
+    private void exit() {
+        saveProgress(); // a failed save already told the player; still let them quit
+        System.exit(0);
+    }
+
+    private static JCheckBox check(String text, boolean on) {
+        JCheckBox c = new JCheckBox(text, on);
+        c.setOpaque(false);
+        c.setFocusPainted(false);
+        c.setForeground(Theme.TEXT);
+        c.setFont(Theme.BODY);
+        return c;
+    }
+
+    private void applySound() {
+        sfx.setVolume(settings.sound ? settings.volume : 0);
+    }
+
+    private void saveSettings() {
+        try {
+            settings.save(Settings.FILE);
+        } catch (Exception ex) {
+            System.err.println("Couldn't save settings: " + ex.getMessage());
+        }
     }
 
     /** See-through holder, so the tree shows (and stays clickable) around the floating widget. */
@@ -164,16 +325,45 @@ public final class GameApp {
     }
 
     private void tryBuy(Node n) {
-        if (!state.buy(n)) return;
+        if (!state.buy(n)) {
+            if (!state.owned.contains(n.id)) sfx.play(Sfx.Sound.DENIED);
+            return;
+        }
+        sfx.play(switch (n.shape) {
+            case SQUARE -> Sfx.Sound.BUY;
+            case CIRCLE -> Sfx.Sound.BUY_IMPORTANT;
+            case HEXAGON -> Sfx.Sound.MILESTONE;
+        });
         Point at = canvas.toScreen(n);
         at.translate(0, -TreeCanvas.size(n));
-        canvas.pop("Unlocked!", at, Theme.GREEN);
+        if (settings.popups) canvas.pop(n.shape == Node.Shape.HEXAGON ? "Milestone!" : "Unlocked!", at, Theme.GREEN);
+        if (n.id.equals("final")) startEnding();
+    }
+
+    /** Ending files sit next to the tree file: ending.mp4 and credits.txt. */
+    private void startEnding() {
+        saveProgress();
+        settingsLayer.setVisible(false);
+        Runnable backToTree = () -> {
+            canvas.setTree(state.tree); // back to normal zoom at the top of the tree
+            refresh();
+        };
+        new Ending(frame, canvas, saveFile.resolveSibling("ending.mp4"), saveFile.resolveSibling("credits.txt"),
+                GameState.REBIRTH_BONUS * (state.rebirths + 1) + 1,
+                backToTree,
+                () -> {
+                    state.reborn();
+                    saveProgress();
+                    backToTree.run();
+                    sfx.play(Sfx.Sound.MILESTONE);
+                }).start();
     }
 
     private void refresh() {
         String cur = state.tree.currency;
         points.setText(Fmt.num(state.points));
-        currency.setText(cur);
+        currency.setText(state.rebirths == 0 ? cur
+                : cur + "  ·  Rebirth " + state.rebirths + " (×" + Fmt.num(state.multiplier()) + ")");
         income.setText("+" + Fmt.num(state.income()) + " /s");
         gather.setText("Gather  +" + Fmt.num(state.clickValue()));
 
@@ -189,7 +379,8 @@ public final class GameApp {
                 sb.append("<br><font color='#8b93b0'>Requires</font><br>");
                 for (String r : n.requires) {
                     boolean has = state.owned.contains(r);
-                    sb.append(has ? "<font color='#34d399'>✔ " : "<font color='#f87171'>✖ ")
+                    // Dialog is Java's logical font, which falls back to a symbol font for these marks
+                    sb.append(has ? "<font color='#34d399'><font face='Dialog'>✔</font> " : "<font color='#f87171'><font face='Dialog'>✖</font> ")
                             .append(esc(state.tree.nodes.get(r).name)).append("</font><br>");
                 }
             }
