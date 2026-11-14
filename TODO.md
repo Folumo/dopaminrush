@@ -18,6 +18,7 @@
 
 ## Helping the player
 - [x] "Next goal" button and a pulsing gold ring (or an arrow at the edge of the screen) on the best thing to buy next. It can be turned off in Settings.
+- [x] Fog of war: you see what you own and what you can buy next. One step further shows as "???", and anything deeper is hidden. The ending reveals the whole tree. The depth is set by `SIGHT` in `GameApp`.
 - [x] Minimap in the bottom-left corner. Click or drag in it to jump around the tree.
 - [x] "Welcome back" card showing what was earned while the game was closed.
 

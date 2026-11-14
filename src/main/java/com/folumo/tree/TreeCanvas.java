@@ -33,6 +33,10 @@ public class TreeCanvas extends JPanel {
     /** Highlighted with a pulsing ring, or an arrow at the edge of the view when it's off screen. */
     public Node goal;
     public boolean minimap = true;
+    /** Nodes that aren't shown are left out completely, with their links (fog of war). */
+    public Predicate<Node> shown = n -> true;
+    /** Shown as "???": the player can see something is there, but not what. */
+    public Predicate<Node> mystery = n -> false;
     private Rectangle mini = new Rectangle(); // where the minimap was last drawn, for clicks
 
     private double offX, offY, zoom = 1;
@@ -143,7 +147,7 @@ public class TreeCanvas extends JPanel {
         double x = (p.x - offX) / zoom, y = (p.y - offY) / zoom;
         Node hit = null; // last match wins: it is drawn on top
         for (Node n : tree.nodes.values())
-            if (outline(n).contains(x, y)) hit = n;
+            if (shown.test(n) && outline(n).contains(x, y)) hit = n;
         return hit;
     }
 
@@ -184,6 +188,7 @@ public class TreeCanvas extends JPanel {
     public String getToolTipText(MouseEvent e) {
         Node n = minimap && mini.contains(e.getPoint()) ? null : nodeAt(e.getPoint());
         if (n == null) return null;
+        if (mystery.test(n)) return "???";
         return "<html><b>" + esc(n.name) + "</b><br>" + esc(n.description).replace("\n", "<br>")
                 + "<br><i>" + esc(I18n.t("info.perSecond", Fmt.num(n.income), tree.currency)) + ", "
                 + esc(I18n.t("info.perClick", Fmt.num(n.clickBonus))) + "</i></html>";
@@ -261,9 +266,9 @@ public class TreeCanvas extends JPanel {
         for (Node n : tree.nodes.values())
             for (String r : n.requires) {
                 Node p = tree.nodes.get(r);
-                if (p != null) paintLink(g, p, n);
+                if (p != null && shown.test(p) && shown.test(n)) paintLink(g, p, n);
             }
-        for (Node n : tree.nodes.values()) paintNode(g, n);
+        for (Node n : tree.nodes.values()) if (shown.test(n)) paintNode(g, n);
         if (goal != null) paintGoalRing(g, goal);
         g.setTransform(screen);
         if (goal != null) paintGoalArrow(g, goal);
@@ -353,9 +358,10 @@ public class TreeCanvas extends JPanel {
         }
 
         g.setFont(hex ? Theme.GLYPH.deriveFont(28f) : Theme.GLYPH);
-        text(g, initials(n.name), x, y + g.getFontMetrics().getAscent() / 2.0 - 3, Color.WHITE);
+        String name = mystery.test(n) ? "???" : n.name;
+        text(g, initials(name), x, y + g.getFontMetrics().getAscent() / 2.0 - 3, Color.WHITE);
         g.setFont(hex ? Theme.NODE_NAME.deriveFont(15f) : Theme.NODE_NAME);
-        text(g, clip(g, n.name, 170), x, y + s + 22, Theme.TEXT);
+        text(g, clip(g, name, 170), x, y + s + 22, Theme.TEXT);
         g.setFont(Theme.NODE_SUB);
         text(g, clip(g, subtitle.apply(n), 170), x, y + s + 39, Theme.GOLD);
     }
@@ -403,6 +409,7 @@ public class TreeCanvas extends JPanel {
         g.setStroke(new BasicStroke(1.2f));
         g.draw(box);
         for (Node n : tree.nodes.values()) {
+            if (!shown.test(n)) continue;
             double d = n.shape == Node.Shape.HEXAGON ? 6 : 3.5;
             g.setColor(Theme.mix(fill.apply(n), Theme.MUTED, .35)); // lighter, so locked nodes still show
             g.fill(new Ellipse2D.Double(mini.x + (n.x - b[0]) * k - d / 2, mini.y + (n.y - b[2]) * k - d / 2, d, d));

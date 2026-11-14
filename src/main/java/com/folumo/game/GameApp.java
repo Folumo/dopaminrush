@@ -16,6 +16,7 @@ import java.awt.event.WindowEvent;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static com.folumo.tree.I18n.t;
 
@@ -43,6 +44,9 @@ public final class GameApp {
     private final Mods mods;
     private final Path modsFolder;
     private boolean inEnding;
+    /** Steps from what the player owns (see GameState.depths); nodes further than SIGHT are hidden. */
+    private Map<String, Integer> depth = Map.of();
+    private static final int SIGHT = 2;
 
     public static void main(String[] args) {
         I18n.setLanguage(Settings.load(Settings.FILE).language);
@@ -103,7 +107,11 @@ public final class GameApp {
         canvas.fill = n -> state.owns(n.id) ? (state.canBuy(n) ? Theme.mix(Theme.GREEN, Theme.ACCENT, .5) : Theme.GREEN)
                 : !state.unlocked(n) ? Theme.LOCKED
                 : state.canBuy(n) ? Theme.ACCENT : Theme.PURPLE;
+        // Fog of war: what you own, what you can buy next, and one more step as "???".
+        canvas.shown = n -> inEnding || depth.getOrDefault(n.id, 0) <= SIGHT;
+        canvas.mystery = n -> !inEnding && depth.getOrDefault(n.id, 0) == SIGHT;
         canvas.subtitle = n -> {
+            if (canvas.mystery.test(n)) return "";
             String price = Fmt.num(state.cost(n)) + " " + state.tree.currency;
             if (n.maxLevel == 1) return state.owns(n.id) ? t("node.owned") : price;
             String lvl = t("node.level", state.level(n), n.maxLevel);
@@ -494,6 +502,7 @@ public final class GameApp {
 
     private void refresh() {
         String cur = state.tree.currency;
+        depth = state.depths();
         points.setText(Fmt.num(state.points));
         currency.setText(state.rebirths == 0 ? cur : t("hud.rebirth", cur, state.rebirths, Fmt.num(state.multiplier())));
         income.setText(t("hud.perSecond", Fmt.num(state.income())));
@@ -506,10 +515,12 @@ public final class GameApp {
             boolean maxed = state.maxed(n), unlocked = state.unlocked(n);
             int lvl = state.level(n);
             StringBuilder sb = new StringBuilder("<html><div style='width:230px'>");
-            if (!n.description.isBlank()) sb.append(esc(n.description).replace("\n", "<br>")).append("<br><br>");
-            if (n.income > 0) sb.append("<font color='#34d399'>").append(esc(t("info.perSecond", Fmt.num(n.income), cur))).append("</font><br>");
-            if (n.clickBonus > 0) sb.append("<font color='#fcd34d'>").append(esc(t("info.perClick", Fmt.num(n.clickBonus)))).append("</font><br>");
-            if (n.maxLevel > 1) sb.append("<font color='#8b93b0'>").append(esc(t("info.level", lvl, n.maxLevel))).append("</font><br>");
+            boolean mystery = canvas.mystery.test(n);
+            if (mystery) sb.append(esc(t("info.mystery"))).append("<br>");
+            else if (!n.description.isBlank()) sb.append(esc(n.description).replace("\n", "<br>")).append("<br><br>");
+            if (n.income > 0 && !mystery) sb.append("<font color='#34d399'>").append(esc(t("info.perSecond", Fmt.num(n.income), cur))).append("</font><br>");
+            if (n.clickBonus > 0 && !mystery) sb.append("<font color='#fcd34d'>").append(esc(t("info.perClick", Fmt.num(n.clickBonus)))).append("</font><br>");
+            if (n.maxLevel > 1 && !mystery) sb.append("<font color='#8b93b0'>").append(esc(t("info.level", lvl, n.maxLevel))).append("</font><br>");
             if (!n.requires.isEmpty()) {
                 sb.append("<br><font color='#8b93b0'>").append(esc(t("info.requires"))).append("</font><br>");
                 for (String r : n.requires) {
@@ -519,9 +530,9 @@ public final class GameApp {
                             .append(esc(state.tree.nodes.get(r).name)).append("</font><br>");
                 }
             }
-            if (!maxed) sb.append("<br><b>").append(esc(t("info.cost"))).append(" <font color='#fcd34d'>")
+            if (!maxed && !mystery) sb.append("<br><b>").append(esc(t("info.cost"))).append(" <font color='#fcd34d'>")
                     .append(Fmt.num(state.cost(n))).append(' ').append(esc(cur)).append("</font></b>");
-            infoName.setText("<html><div style='width:230px'>" + esc(n.name) + "</div></html>");
+            infoName.setText("<html><div style='width:230px'>" + (mystery ? "???" : esc(n.name)) + "</div></html>");
             infoBody.setText(sb.append("</div></html>").toString());
             buy.setText(t(maxed ? (n.maxLevel == 1 ? "buy.owned" : "buy.maxed")
                     : !unlocked ? "buy.locked" : lvl > 0 ? "buy.upgrade" : "buy.buy"));

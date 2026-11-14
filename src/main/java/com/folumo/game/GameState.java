@@ -80,6 +80,28 @@ public final class GameState {
         return !maxed(n) && unlocked(n);
     }
 
+    /**
+     * How far each node is from what the player owns: 0 = owned, 1 = all requirements owned,
+     * 2 = needs one more step first, and so on. The game hides nodes that are too far away.
+     */
+    public Map<String, Integer> depths() {
+        Map<String, Integer> d = new java.util.HashMap<>();
+        for (Node n : tree.nodes.values()) depth(n, d);
+        return d;
+    }
+
+    private int depth(Node n, Map<String, Integer> d) {
+        Integer known = d.get(n.id);
+        if (known != null) return known;
+        int v = 0;
+        if (!owns(n.id)) {
+            v = 1;
+            for (String r : n.requires) v = Math.max(v, 1 + depth(tree.nodes.get(r), d));
+        }
+        d.put(n.id, v);
+        return v;
+    }
+
     public boolean canBuy(Node n) {
         return available(n) && points >= cost(n);
     }

@@ -125,6 +125,20 @@ class GameStateTest {
     }
 
     @Test
+    void depthCountsStepsFromWhatIsOwned() {
+        Node grandchild = tree.add(0, 0);
+        grandchild.requires.add(child.id);
+        GameState s = new GameState(tree);
+        assertEquals(1, s.depths().get(root.id), "nothing needed first");
+        assertEquals(2, s.depths().get(child.id));
+        assertEquals(3, s.depths().get(grandchild.id));
+        s.levels.put(root.id, 1);
+        assertEquals(0, s.depths().get(root.id));
+        assertEquals(1, s.depths().get(child.id));
+        assertEquals(2, s.depths().get(grandchild.id));
+    }
+
+    @Test
     void bestNextPicksTheQuickestPayoff() {
         Node rich = tree.add(0, 0), poor = tree.add(0, 0);
         rich.cost = poor.cost = 100;
