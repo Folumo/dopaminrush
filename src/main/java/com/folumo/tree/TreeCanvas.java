@@ -115,8 +115,35 @@ public class TreeCanvas extends JPanel {
         double x = (p.x - offX) / zoom, y = (p.y - offY) / zoom;
         Node hit = null; // last match wins: it is drawn on top
         for (Node n : tree.nodes.values())
-            if (Point2D.distanceSq(x, y, n.x, n.y) <= R * R) hit = n;
+            if (outline(n).contains(x, y)) hit = n;
         return hit;
+    }
+
+    /** Half-size of a node: hexagons are the biggest, squares the smallest. */
+    public static int size(Node n) {
+        return switch (n.shape) {
+            case SQUARE -> 27;
+            case CIRCLE -> R;
+            case HEXAGON -> 44;
+        };
+    }
+
+    private static java.awt.Shape outline(Node n) {
+        double x = n.x, y = n.y, s = size(n);
+        return switch (n.shape) {
+            case SQUARE -> new RoundRectangle2D.Double(x - s, y - s, s * 2, s * 2, 16, 16);
+            case CIRCLE -> new Ellipse2D.Double(x - s, y - s, s * 2, s * 2);
+            case HEXAGON -> {
+                Path2D hex = new Path2D.Double();
+                for (int i = 0; i < 6; i++) {
+                    double a = Math.PI / 3 * i - Math.PI / 2; // pointy top
+                    if (i == 0) hex.moveTo(x + s * Math.cos(a), y + s * Math.sin(a));
+                    else hex.lineTo(x + s * Math.cos(a), y + s * Math.sin(a));
+                }
+                hex.closePath();
+                yield hex;
+            }
+        };
     }
 
     /** Floating text that rises and fades, at a point in this component's coordinates. */
@@ -145,7 +172,7 @@ public class TreeCanvas extends JPanel {
             first = false;
         }
         offX = getWidth() / 2.0 - (minX + maxX) / 2 * zoom;
-        offY = getHeight() / 2.0 - (minY + maxY) / 2 * zoom;
+        offY = Math.max(getHeight() / 2.0 - (minY + maxY) / 2 * zoom, 230 - minY * zoom); // tall trees open at the top, below the HUD
     }
 
     @Override
@@ -227,30 +254,41 @@ public class TreeCanvas extends JPanel {
 
     private void paintNode(Graphics2D g, Node n) {
         Color c = fill.apply(n);
-        double x = n.x, y = n.y;
-        g.setPaint(new RadialGradientPaint(new Point2D.Double(x, y), R * 2.2f, new float[]{.3f, 1f},
-                new Color[]{Theme.alpha(c, 120), Theme.alpha(c, 0)}));
-        g.fill(new Ellipse2D.Double(x - R * 2.2, y - R * 2.2, R * 4.4, R * 4.4));
+        double x = n.x, y = n.y, s = size(n);
+        boolean hex = n.shape == Node.Shape.HEXAGON;
+        float glow = (float) s * (hex ? 2.8f : 2.2f);
+        g.setPaint(new RadialGradientPaint(new Point2D.Double(x, y), glow, new float[]{.3f, 1f},
+                new Color[]{Theme.alpha(c, hex ? 160 : 120), Theme.alpha(c, 0)}));
+        g.fill(new Ellipse2D.Double(x - glow, y - glow, glow * 2, glow * 2));
 
-        Ellipse2D orb = new Ellipse2D.Double(x - R, y - R, R * 2, R * 2);
-        g.setPaint(new RadialGradientPaint(new Point2D.Double(x - R * .35, y - R * .4), R * 1.5f, new float[]{0, .55f, 1},
+        java.awt.Shape body = outline(n);
+        g.setPaint(new RadialGradientPaint(new Point2D.Double(x - s * .35, y - s * .4), (float) s * 1.5f, new float[]{0, .55f, 1},
                 new Color[]{Theme.mix(c, Color.WHITE, .45), c.darker(), Theme.mix(c, Color.BLACK, .8)}));
-        g.fill(orb);
-        g.setStroke(new BasicStroke(n == selected ? 3.5f : 2f));
+        g.fill(body);
+        g.setStroke(new BasicStroke(n == selected ? 3.5f : hex ? 3f : 2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         g.setColor(n == selected ? Color.WHITE : Theme.mix(c, Color.WHITE, .35));
-        g.draw(orb);
+        g.draw(body);
+        if (hex) { // inner ring marks a milestone
+            AffineTransform inner = AffineTransform.getTranslateInstance(x, y);
+            inner.scale(.78, .78);
+            inner.translate(-x, -y);
+            g.setStroke(new BasicStroke(1.5f));
+            g.setColor(Theme.alpha(Theme.mix(c, Color.WHITE, .5), 170));
+            g.draw(inner.createTransformedShape(body));
+        }
         if (n == selected) {
             g.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 1, new float[]{4, 5}, 0));
             g.setColor(Theme.alpha(Color.WHITE, 140));
-            g.draw(new Ellipse2D.Double(x - R - 8, y - R - 8, R * 2 + 16, R * 2 + 16));
+            double sel = s * (n.shape == Node.Shape.SQUARE ? 1.4 : 1) + 9;
+            g.draw(new Ellipse2D.Double(x - sel, y - sel, sel * 2, sel * 2));
         }
 
-        g.setFont(Theme.GLYPH);
+        g.setFont(hex ? Theme.GLYPH.deriveFont(28f) : Theme.GLYPH);
         text(g, initials(n.name), x, y + g.getFontMetrics().getAscent() / 2.0 - 3, Color.WHITE);
-        g.setFont(Theme.NODE_NAME);
-        text(g, clip(g, n.name, 170), x, y + R + 22, Theme.TEXT);
+        g.setFont(hex ? Theme.NODE_NAME.deriveFont(15f) : Theme.NODE_NAME);
+        text(g, clip(g, n.name, 170), x, y + s + 22, Theme.TEXT);
         g.setFont(Theme.NODE_SUB);
-        text(g, clip(g, subtitle.apply(n), 170), x, y + R + 39, Theme.GOLD);
+        text(g, clip(g, subtitle.apply(n), 170), x, y + s + 39, Theme.GOLD);
     }
 
     private void paintPops(Graphics2D g) {

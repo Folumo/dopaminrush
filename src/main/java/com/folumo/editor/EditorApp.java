@@ -26,6 +26,7 @@ public final class EditorApp {
     private final JTextField currency = new JTextField(10);
     private final JLabel idLabel = new JLabel("-");
     private final JTextField name = new JTextField(18);
+    private final JComboBox<Node.Shape> shape = new JComboBox<>(Node.Shape.values());
     private final JTextArea desc = new JTextArea(5, 18);
     private final JTextField cost = new JTextField(), income = new JTextField(), click = new JTextField(), requires = new JTextField();
 
@@ -95,7 +96,9 @@ public final class EditorApp {
         c.weightx = 1;
         desc.setLineWrap(true);
         desc.setWrapStyleWord(true);
-        Object[][] rows = {{"Id", idLabel}, {"Name", name}, {"Description", new JScrollPane(desc)},
+        Object[][] rows = {{"Id", idLabel}, {"Name", name},
+                {"<html>Shape <font color=gray>(square = normal, circle = important,<br>hexagon = milestone that starts new branches)</font></html>", shape},
+                {"Description", new JScrollPane(desc)},
                 {"Cost", cost}, {"Income per second", income}, {"Click bonus", click},
                 {"Requires (ids, comma separated)", requires}};
         for (Object[] r : rows) {
@@ -122,12 +125,13 @@ public final class EditorApp {
         Node n = canvas.selected;
         idLabel.setText(n == null ? "-" : n.id);
         name.setText(n == null ? "" : n.name);
+        shape.setSelectedItem(n == null ? Node.Shape.SQUARE : n.shape);
         desc.setText(n == null ? "" : n.description);
         cost.setText(n == null ? "" : Double.toString(n.cost));
         income.setText(n == null ? "" : Double.toString(n.income));
         click.setText(n == null ? "" : Double.toString(n.clickBonus));
         requires.setText(n == null ? "" : String.join(", ", n.requires));
-        for (JComponent f : new JComponent[]{name, desc, cost, income, click, requires}) f.setEnabled(n != null);
+        for (JComponent f : new JComponent[]{name, shape, desc, cost, income, click, requires}) f.setEnabled(n != null);
     }
 
     private void apply() {
@@ -143,6 +147,7 @@ public final class EditorApp {
                 if (tree.wouldCycle(n.id, r)) throw new IllegalArgumentException("Requiring '" + r + "' would create a loop.");
             }
             n.name = name.getText().trim().isEmpty() ? n.id : name.getText().trim();
+            n.shape = (Node.Shape) shape.getSelectedItem();
             n.description = desc.getText();
             n.cost = c;
             n.income = inc;

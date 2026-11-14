@@ -5,7 +5,11 @@ import java.util.Set;
 
 /** One upgrade in the tree. */
 public final class Node {
+    /** Square = normal, circle = important, hexagon = very important milestone that new branches grow from. */
+    public enum Shape { SQUARE, CIRCLE, HEXAGON }
+
     public final String id;
+    public Shape shape = Shape.SQUARE;
     public String name;
     public String description = "";
     public double cost;

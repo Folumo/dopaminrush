@@ -19,6 +19,7 @@ class TreeTest {
         Node b = t.add(30, 40);
         b.requires.add(a.id);
         b.clickBonus = 3;
+        b.shape = Node.Shape.HEXAGON;
 
         Path f = dir.resolve("t.properties");
         t.save(f);
@@ -33,6 +34,8 @@ class TreeTest {
         assertEquals(10, la.x);
         assertEquals(3, lb.clickBonus);
         assertEquals(b.requires, lb.requires);
+        assertEquals(Node.Shape.SQUARE, la.shape);
+        assertEquals(Node.Shape.HEXAGON, lb.shape);
     }
 
     @Test

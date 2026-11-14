@@ -166,7 +166,7 @@ public final class GameApp {
     private void tryBuy(Node n) {
         if (!state.buy(n)) return;
         Point at = canvas.toScreen(n);
-        at.translate(0, -TreeCanvas.R);
+        at.translate(0, -TreeCanvas.size(n));
         canvas.pop("Unlocked!", at, Theme.GREEN);
     }
 

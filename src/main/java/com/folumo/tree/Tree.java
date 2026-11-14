@@ -54,6 +54,7 @@ public final class Tree {
             p.setProperty(k + "cost", Double.toString(n.cost));
             p.setProperty(k + "income", Double.toString(n.income));
             p.setProperty(k + "click", Double.toString(n.clickBonus));
+            p.setProperty(k + "shape", n.shape.name().toLowerCase(Locale.ROOT));
             p.setProperty(k + "x", Integer.toString(n.x));
             p.setProperty(k + "y", Integer.toString(n.y));
             p.setProperty(k + "requires", String.join(",", n.requires));
@@ -72,6 +73,12 @@ public final class Tree {
             n.cost = num(p, k + "cost");
             n.income = num(p, k + "income");
             n.clickBonus = num(p, k + "click");
+            String shape = p.getProperty(k + "shape", "square").trim();
+            try {
+                n.shape = Node.Shape.valueOf(shape.toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Bad shape for '" + id + "': " + shape + " (use square, circle or hexagon)");
+            }
             n.x = (int) num(p, k + "x");
             n.y = (int) num(p, k + "y");
             n.requires.addAll(split(p.getProperty(k + "requires", "")));
