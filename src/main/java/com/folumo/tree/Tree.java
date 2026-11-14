@@ -15,9 +15,14 @@ public final class Tree {
     public final Map<String, Node> nodes = new LinkedHashMap<>();
 
     public Node add(int x, int y) {
-        int i = nodes.size() + 1;
-        while (nodes.containsKey("n" + i)) i++;
-        Node n = new Node("n" + i, "New node");
+        return add(x, y, "n");
+    }
+
+    /** Adds a node with the first free id {@code <prefix><number>}. */
+    public Node add(int x, int y, String prefix) {
+        int i = 1;
+        while (nodes.containsKey(prefix + i)) i++;
+        Node n = new Node(prefix + i, "New node");
         n.x = x;
         n.y = y;
         n.cost = 10;
@@ -47,19 +52,23 @@ public final class Tree {
         Properties p = new Properties();
         p.setProperty("currency", currency);
         p.setProperty("nodes", String.join(",", nodes.keySet()));
-        for (Node n : nodes.values()) {
-            String k = n.id + ".";
-            p.setProperty(k + "name", n.name);
-            p.setProperty(k + "desc", n.description);
-            p.setProperty(k + "cost", Double.toString(n.cost));
-            p.setProperty(k + "income", Double.toString(n.income));
-            p.setProperty(k + "click", Double.toString(n.clickBonus));
-            p.setProperty(k + "shape", n.shape.name().toLowerCase(Locale.ROOT));
-            p.setProperty(k + "x", Integer.toString(n.x));
-            p.setProperty(k + "y", Integer.toString(n.y));
-            p.setProperty(k + "requires", String.join(",", n.requires));
-        }
+        for (Node n : nodes.values()) put(p, n);
         store(p, file, "Node tree");
+    }
+
+    /** Writes one node's keys into {@code p}. */
+    public static void put(Properties p, Node n) {
+        String k = n.id + ".";
+        p.setProperty(k + "name", n.name);
+        p.setProperty(k + "desc", n.description);
+        p.setProperty(k + "cost", Double.toString(n.cost));
+        p.setProperty(k + "income", Double.toString(n.income));
+        p.setProperty(k + "click", Double.toString(n.clickBonus));
+        p.setProperty(k + "shape", n.shape.name().toLowerCase(Locale.ROOT));
+        p.setProperty(k + "max", Integer.toString(n.maxLevel));
+        p.setProperty(k + "x", Integer.toString(n.x));
+        p.setProperty(k + "y", Integer.toString(n.y));
+        p.setProperty(k + "requires", String.join(",", n.requires));
     }
 
     public static Tree load(Path file) throws IOException {
@@ -82,6 +91,7 @@ public final class Tree {
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("Bad shape for '" + id + "': " + shape + " (use square, circle or hexagon)");
             }
+            n.maxLevel = p.containsKey(k + "max") ? Math.max(1, (int) num(p, k + "max")) : Node.defaultMax(n.shape);
             n.x = (int) num(p, k + "x");
             n.y = (int) num(p, k + "y");
             n.requires.addAll(split(p.getProperty(k + "requires", "")));

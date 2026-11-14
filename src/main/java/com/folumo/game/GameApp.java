@@ -15,6 +15,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static com.folumo.tree.I18n.t;
 
@@ -41,11 +42,12 @@ public final class GameApp {
     private final JPanel settingsLayer = new JPanel(new GridBagLayout());
     private final Mods mods;
     private final Path modsFolder;
+    private boolean inEnding;
 
     public static void main(String[] args) {
         I18n.setLanguage(Settings.load(Settings.FILE).language);
         SwingUtilities.invokeLater(() -> {
-            Path treeFile = Path.of(args.length > 0 ? args[0] : "tree.properties");
+            Path treeFile = args.length > 0 ? Path.of(args[0]) : defaultTree();
             if (!Files.exists(treeFile)) {
                 JFileChooser fc = new JFileChooser(new java.io.File("."));
                 fc.setDialogTitle(t("app.pickTree"));
@@ -62,6 +64,20 @@ public final class GameApp {
         });
     }
 
+    /** tree.properties in the current folder, else next to the game's jar (where the packaged app keeps it). */
+    private static Path defaultTree() {
+        Path here = Path.of("tree.properties");
+        if (Files.exists(here)) return here;
+        try {
+            Path besideJar = Path.of(GameApp.class.getProtectionDomain().getCodeSource().getLocation().toURI())
+                    .resolveSibling("tree.properties");
+            if (Files.exists(besideJar)) return besideJar;
+        } catch (Exception e) {
+            // no jar location (unusual class loader): fall back to the file picker
+        }
+        return here;
+    }
+
     private GameApp(Path treeFile) throws Exception {
         this.treeFile = treeFile.toAbsolutePath();
         mods = Mods.load(treeFile);
@@ -75,16 +91,26 @@ public final class GameApp {
         });
         modsFolder = Mods.folder(treeFile);
         String base = treeFile.getFileName().toString().replaceFirst("\\.[^.]*$", "");
-        saveFile = this.treeFile.resolveSibling(base + ".save");
+        Path dir = this.treeFile.getParent();
+        if (Files.isWritable(dir)) saveFile = dir.resolve(base + ".save");
+        else { // e.g. installed under Program Files: keep progress in the player's home folder
+            saveFile = Path.of(System.getProperty("user.home"), ".dopaminrush", base + ".save");
+            Files.createDirectories(saveFile.getParent());
+        }
         state = GameState.load(tree, saveFile);
 
         canvas = new TreeCanvas(tree);
-        canvas.fill = n -> state.owned.contains(n.id) ? Theme.GREEN
+        canvas.fill = n -> state.owns(n.id) ? (state.canBuy(n) ? Theme.mix(Theme.GREEN, Theme.ACCENT, .5) : Theme.GREEN)
                 : !state.unlocked(n) ? Theme.LOCKED
                 : state.canBuy(n) ? Theme.ACCENT : Theme.PURPLE;
-        canvas.subtitle = n -> state.owned.contains(n.id) ? t("node.owned") : Fmt.num(n.cost) + " " + tree.currency;
-        canvas.edgeColor = (from, to) -> !state.owned.contains(from.id) ? null
-                : state.owned.contains(to.id) ? Theme.GREEN : Theme.mix(Theme.ACCENT, Theme.BG, .35);
+        canvas.subtitle = n -> {
+            String price = Fmt.num(state.cost(n)) + " " + state.tree.currency;
+            if (n.maxLevel == 1) return state.owns(n.id) ? t("node.owned") : price;
+            String lvl = t("node.level", state.level(n), n.maxLevel);
+            return state.maxed(n) ? lvl : state.owns(n.id) ? lvl + "  ·  " + Fmt.num(state.cost(n)) : price;
+        };
+        canvas.edgeColor = (from, to) -> !state.owns(from.id) ? null
+                : state.owns(to.id) ? Theme.GREEN : Theme.mix(Theme.ACCENT, Theme.BG, .35);
         canvas.onPress = (n, e) -> {
             if (n != null && n != canvas.selected) sfx.play(Sfx.Sound.SELECT);
             if (n != null) settingsLayer.setVisible(false); // info card and settings never overlap
@@ -98,12 +124,12 @@ public final class GameApp {
         canvas.add(infoCard(), BorderLayout.EAST);
         canvas.add(bottomBar(), BorderLayout.SOUTH);
         canvas.add(settingsPanel(), BorderLayout.CENTER);
-        canvas.add(breakReminder(), BorderLayout.WEST);
+        canvas.add(notices(), BorderLayout.WEST);
         canvas.registerKeyboardAction(e -> toggleSettings(),
                 KeyStroke.getKeyStroke("ESCAPE"), JComponent.WHEN_IN_FOCUSED_WINDOW);
         applySound();
 
-        frame.setTitle(base);
+        frame.setTitle(base.equals("tree") ? "Dopamin Rush" : base); // the main tree is the game itself
         frame.setContentPane(canvas);
         frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         frame.setIconImages(com.folumo.tree.GameIcon.images());
@@ -117,7 +143,7 @@ public final class GameApp {
         long[] last = {System.nanoTime()};
         new Timer(100, e -> {
             long now = System.nanoTime();
-            state.tick((now - last[0]) / 1e9);
+            state.play((now - last[0]) / 1e9);
             last[0] = now;
             refresh();
         }).start();
@@ -133,6 +159,9 @@ public final class GameApp {
         frame.pack();
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
+        if (state.awaySeconds >= 60 && state.awayEarned > 0)
+            notice(t("away.title"), t("away.body", I18n.duration((int) (state.awaySeconds / 60)),
+                    Fmt.num(state.awayEarned), esc(tree.currency)), t("away.ok"));
         if (!mods.errors.isEmpty()) // the errors themselves stay in English: they're for mod makers
             JOptionPane.showMessageDialog(frame, t("mods.skipped") + "\n\n• " + String.join("\n• ", mods.errors),
                     t("mods.title"), JOptionPane.WARNING_MESSAGE);
@@ -147,36 +176,44 @@ public final class GameApp {
         return floating(new FlowLayout(FlowLayout.CENTER, 0, 16), card);
     }
 
-    /** Every 30 minutes of play, a card on the left kindly suggests a break. */
-    private JComponent breakReminder() {
-        Theme.Card card = new Theme.Card();
-        JLabel title = Theme.label(t("break.title"), Theme.H2, Theme.GOLD);
-        JLabel body = Theme.label("", Theme.BODY, Theme.TEXT);
-        JButton ok = Theme.button(t("break.ok"), Theme.ACCENT);
-        for (JComponent c : new JComponent[]{title, body, ok}) {
+    private final Theme.Card noticeCard = new Theme.Card();
+    private final JLabel noticeTitle = Theme.label("", Theme.H2, Theme.GOLD);
+    private final JLabel noticeBody = Theme.label("", Theme.BODY, Theme.TEXT);
+    private final JButton noticeOk = Theme.button("", Theme.ACCENT);
+    private final Timer noticeHide = new Timer(60_000, e -> noticeCard.setVisible(false));
+
+    /** A card on the left for the break reminder and the welcome back message; hides by itself after a minute. */
+    private JComponent notices() {
+        for (JComponent c : new JComponent[]{noticeTitle, noticeBody, noticeOk}) {
             c.setAlignmentX(Component.LEFT_ALIGNMENT);
-            card.add(c);
-            card.add(Box.createVerticalStrut(12));
+            noticeCard.add(c);
+            noticeCard.add(Box.createVerticalStrut(12));
         }
         JPanel wrap = new JPanel(new BorderLayout());
         wrap.setOpaque(false);
         wrap.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 0));
-        wrap.add(card, BorderLayout.NORTH);
-        card.setVisible(false);
+        wrap.add(noticeCard, BorderLayout.NORTH);
+        noticeCard.setVisible(false);
+        noticeHide.setRepeats(false);
+        noticeOk.addActionListener(e -> noticeCard.setVisible(false));
 
-        Timer hide = new Timer(60_000, e -> card.setVisible(false));
-        hide.setRepeats(false);
-        ok.addActionListener(e -> card.setVisible(false));
-        int every = 30; // minutes
+        int every = 30; // minutes of play between break reminders
         int[] played = {0};
         new Timer(every * 60_000, e -> {
             played[0] += every;
-            body.setText("<html><div style='width:220px'>" + t("break.body", I18n.duration(played[0])) + "</div></html>");
-            card.setVisible(true);
+            notice(t("break.title"), t("break.body", I18n.duration(played[0])), t("break.ok"));
             sfx.play(Sfx.Sound.BUY_IMPORTANT);
-            hide.restart();
         }).start();
         return wrap;
+    }
+
+    /** @param body may contain simple HTML */
+    private void notice(String title, String body, String ok) {
+        noticeTitle.setText(title);
+        noticeBody.setText("<html><div style='width:220px'>" + body + "</div></html>");
+        noticeOk.setText(ok);
+        noticeCard.setVisible(true);
+        noticeHide.restart();
     }
 
     private JComponent infoCard() {
@@ -203,9 +240,20 @@ public final class GameApp {
             if (settings.popups) canvas.pop("+" + Fmt.num(state.clickValue()), at, Theme.GOLD);
             refresh();
         });
+        JButton goal = Theme.button(t("goal.button"), Theme.PURPLE);
+        goal.addActionListener(e -> {
+            Node n = state.bestNext(1);
+            if (n == null) return;
+            settingsLayer.setVisible(false);
+            canvas.selected = n;
+            canvas.focus(n);
+            sfx.play(Sfx.Sound.SELECT);
+            refresh();
+        });
         JButton open = Theme.button(t("settings.open"), new Color(0x374151));
         open.addActionListener(e -> toggleSettings());
-        JPanel bar = floating(new FlowLayout(FlowLayout.CENTER, 16, 20), gather);
+        JPanel bar = floating(new FlowLayout(FlowLayout.CENTER, 16, 20), goal);
+        bar.add(gather);
         bar.add(open);
         return bar;
     }
@@ -217,6 +265,12 @@ public final class GameApp {
         volume.setOpaque(false);
         volume.setEnabled(settings.sound);
         JCheckBox popups = check(t("settings.popups"), settings.popups);
+        JCheckBox goalHint = check(t("settings.goal"), settings.goalHint);
+        goalHint.addActionListener(e -> {
+            settings.goalHint = goalHint.isSelected();
+            saveSettings();
+            refresh();
+        });
 
         sound.addActionListener(e -> {
             settings.sound = sound.isSelected();
@@ -297,7 +351,7 @@ public final class GameApp {
         });
 
         JComponent[] rows = {Theme.label(t("settings.title"), Theme.H2, Color.WHITE), sound,
-                Theme.label(t("settings.volume"), Theme.BODY, Theme.MUTED), volume, popups,
+                Theme.label(t("settings.volume"), Theme.BODY, Theme.MUTED), volume, popups, goalHint,
                 Theme.label(t("settings.language"), Theme.BODY, Theme.MUTED), language,
                 Theme.label(t("mods.heading"), Theme.BODY, Theme.MUTED), modList, openMods,
                 row(save, exit), row(reset, close)};
@@ -307,7 +361,7 @@ public final class GameApp {
         for (JComponent c : rows) {
             c.setAlignmentX(Component.LEFT_ALIGNMENT);
             card.add(c);
-            card.add(Box.createVerticalStrut(c == popups || c == language || c == openMods ? 22 : 10));
+            card.add(Box.createVerticalStrut(c == goalHint || c == language || c == openMods ? 14 : 6));
         }
         settingsLayer.setOpaque(false);
         settingsLayer.add(card);
@@ -393,9 +447,10 @@ public final class GameApp {
 
     private void tryBuy(Node n) {
         if (!state.buy(n)) {
-            if (!state.owned.contains(n.id)) sfx.play(Sfx.Sound.DENIED);
+            if (!state.maxed(n)) sfx.play(Sfx.Sound.DENIED);
             return;
         }
+        int lvl = state.level(n);
         sfx.play(switch (n.shape) {
             case SQUARE -> Sfx.Sound.BUY;
             case CIRCLE -> Sfx.Sound.BUY_IMPORTANT;
@@ -403,21 +458,31 @@ public final class GameApp {
         });
         Point at = canvas.toScreen(n);
         at.translate(0, -TreeCanvas.size(n));
-        if (settings.popups) canvas.pop(t(n.shape == Node.Shape.HEXAGON ? "pop.milestone" : "pop.unlocked"), at, Theme.GREEN);
-        if (n.id.equals("final")) startEnding();
+        if (settings.popups) canvas.pop(lvl > 1 ? t("pop.level", lvl)
+                : t(n.shape == Node.Shape.HEXAGON ? "pop.milestone" : "pop.unlocked"), at, Theme.GREEN);
+        if (n.id.equals("final") && lvl == 1) startEnding();
     }
 
     /** Ending files sit next to the tree file: ending.mp4 and credits.txt (or ending_hr.mp4, credits_hr.txt, ...). */
     private void startEnding() {
         saveProgress();
         settingsLayer.setVisible(false);
+        noticeCard.setVisible(false);
+        canvas.minimap = false; // just the tree for the ending
+        inEnding = true;
         Runnable backToTree = () -> {
+            inEnding = false;
+            canvas.minimap = true;
             canvas.setTree(state.tree); // back to normal zoom at the top of the tree
             refresh();
         };
-        new Ending(frame, canvas, I18n.localized(saveFile.resolveSibling("ending.mp4")),
-                I18n.localized(saveFile.resolveSibling("credits.txt")),
+        new Ending(frame, canvas, I18n.localized(treeFile.resolveSibling("ending.mp4")),
+                I18n.localized(treeFile.resolveSibling("credits.txt")),
                 GameState.REBIRTH_BONUS * (state.rebirths + 1) + 1,
+                List.of(new String[]{t("stats.played"), I18n.duration(Math.max(1, (int) (state.playSeconds / 60)))},
+                        new String[]{t("stats.clicks"), Fmt.num(state.clicks)},
+                        new String[]{t("stats.bought"), Fmt.num(state.bought)},
+                        new String[]{t("stats.earned", state.tree.currency), Fmt.num(state.earned)}),
                 backToTree,
                 () -> {
                     state.reborn();
@@ -433,29 +498,33 @@ public final class GameApp {
         currency.setText(state.rebirths == 0 ? cur : t("hud.rebirth", cur, state.rebirths, Fmt.num(state.multiplier())));
         income.setText(t("hud.perSecond", Fmt.num(state.income())));
         gather.setText(t("gather", Fmt.num(state.clickValue())));
+        canvas.goal = settings.goalHint && !inEnding ? state.bestNext(1) : null;
 
         Node n = canvas.selected;
         info.setVisible(n != null);
         if (n != null) {
-            boolean owned = state.owned.contains(n.id), unlocked = state.unlocked(n);
+            boolean maxed = state.maxed(n), unlocked = state.unlocked(n);
+            int lvl = state.level(n);
             StringBuilder sb = new StringBuilder("<html><div style='width:230px'>");
             if (!n.description.isBlank()) sb.append(esc(n.description).replace("\n", "<br>")).append("<br><br>");
             if (n.income > 0) sb.append("<font color='#34d399'>").append(esc(t("info.perSecond", Fmt.num(n.income), cur))).append("</font><br>");
             if (n.clickBonus > 0) sb.append("<font color='#fcd34d'>").append(esc(t("info.perClick", Fmt.num(n.clickBonus)))).append("</font><br>");
+            if (n.maxLevel > 1) sb.append("<font color='#8b93b0'>").append(esc(t("info.level", lvl, n.maxLevel))).append("</font><br>");
             if (!n.requires.isEmpty()) {
                 sb.append("<br><font color='#8b93b0'>").append(esc(t("info.requires"))).append("</font><br>");
                 for (String r : n.requires) {
-                    boolean has = state.owned.contains(r);
+                    boolean has = state.owns(r);
                     // Dialog is Java's logical font, which falls back to a symbol font for these marks
                     sb.append(has ? "<font color='#34d399'><font face='Dialog'>✔</font> " : "<font color='#f87171'><font face='Dialog'>✖</font> ")
                             .append(esc(state.tree.nodes.get(r).name)).append("</font><br>");
                 }
             }
-            if (!owned) sb.append("<br><b>").append(esc(t("info.cost"))).append(" <font color='#fcd34d'>")
-                    .append(Fmt.num(n.cost)).append(' ').append(esc(cur)).append("</font></b>");
+            if (!maxed) sb.append("<br><b>").append(esc(t("info.cost"))).append(" <font color='#fcd34d'>")
+                    .append(Fmt.num(state.cost(n))).append(' ').append(esc(cur)).append("</font></b>");
             infoName.setText("<html><div style='width:230px'>" + esc(n.name) + "</div></html>");
             infoBody.setText(sb.append("</div></html>").toString());
-            buy.setText(t(owned ? "buy.owned" : !unlocked ? "buy.locked" : "buy.buy"));
+            buy.setText(t(maxed ? (n.maxLevel == 1 ? "buy.owned" : "buy.maxed")
+                    : !unlocked ? "buy.locked" : lvl > 0 ? "buy.upgrade" : "buy.buy"));
             buy.setEnabled(state.canBuy(n));
         }
         canvas.repaint();

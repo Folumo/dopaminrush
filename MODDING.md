@@ -31,14 +31,17 @@ The format is the same as the main `tree.properties`. List your new node ids in 
 |---|---|
 | `name` | Name shown on the node |
 | `desc` | Description in the info card (use `\n` for a new line) |
-| `cost` | Price in Dopamine |
-| `income` | Dopamine per second once bought |
-| `click` | Extra Dopamine per Gather click once bought |
+| `cost` | Price of the first level, in Dopamine |
+| `income` | Dopamine per second, per level |
+| `click` | Extra Dopamine per Gather click, per level |
 | `shape` | `square` (normal), `circle` (important) or `hexagon` (milestone) |
+| `max` | How many times it can be bought. Each level adds the income and click bonus again and costs 1.3× the one before. Default: 10 for squares, 5 for circles, 1 for hexagons |
 | `x`, `y` | Position of the node's centre. The main tree's rows are 180 apart. |
 | `requires` | Comma-separated ids that must be bought first |
 
 `requires` can point at any node in the main tree, or in a mod that loads before yours.
+
+For prices, look at the main-tree nodes in the same row: costs grow about 7–8× per row (180 pixels down), and a node usually earns its cost back in a few minutes.
 
 **Start your ids with your mod's name** (for example `thrill_sports`), so two mods never pick the same id by accident.
 
@@ -93,4 +96,8 @@ Sounds must be **PCM WAV at 44100 Hz**, mono or stereo. Keep them short; they pl
 
 ## Building a mod tree with the editor
 
-The tree editor (`gradlew runEditor`) is easiest for laying out nodes visually. It doesn't load mods yet, though. To link a mod node to the main tree, build your nodes in the editor and then add the main-tree ids to their `requires=` lines by hand.
+The tree editor (`gradlew runEditor`) lays out nodes visually. Click **Open mod...** and pick your mod's folder (it can be a new, empty folder inside `mods/`), or start it with `gradlew runEditor --args="--mod mods/my-mod"`.
+
+- The main tree is shown in grey. You can't change it here, but you can link to it: select one of your nodes and **Shift+click** a grey node to make it a requirement.
+- **Add node** gives new nodes ids that start with your folder name.
+- **Save** writes only your nodes into `mods/my-mod/tree.properties`. Anything else already in that file, such as changed texts of main-tree nodes or translations, is kept.

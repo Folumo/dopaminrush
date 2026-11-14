@@ -12,6 +12,7 @@ import java.util.Random;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * Draws a tree as glowing orbs over a starfield. Node x/y is the orb centre.
@@ -27,8 +28,12 @@ public class TreeCanvas extends JPanel {
     public BiFunction<Node, Node, Color> edgeColor = (from, to) -> null; // null = dim link, otherwise it glows
     public BiConsumer<Node, MouseEvent> onPress = (n, e) -> {}; // n is null when empty space is pressed
     public Runnable onMoved = () -> {};
-    public boolean movable;
+    public Predicate<Node> movable = n -> false;
     public Node selected;
+    /** Highlighted with a pulsing ring, or an arrow at the edge of the view when it's off screen. */
+    public Node goal;
+    public boolean minimap = true;
+    private Rectangle mini = new Rectangle(); // where the minimap was last drawn, for clicks
 
     private double offX, offY, zoom = 1;
     private boolean centered;
@@ -53,12 +58,18 @@ public class TreeCanvas extends JPanel {
             Point last, start;
             Node drag;
             int dragX, dragY;
+            boolean onMini;
 
             @Override
             public void mousePressed(MouseEvent e) {
                 last = start = e.getPoint();
+                onMini = minimap && mini.contains(e.getPoint());
+                if (onMini) {
+                    lookAtMini(e.getPoint());
+                    return;
+                }
                 Node n = nodeAt(e.getPoint());
-                drag = movable && SwingUtilities.isLeftMouseButton(e) && !e.isShiftDown() ? n : null;
+                drag = n != null && movable.test(n) && SwingUtilities.isLeftMouseButton(e) && !e.isShiftDown() ? n : null;
                 if (drag != null) {
                     dragX = drag.x;
                     dragY = drag.y;
@@ -69,7 +80,8 @@ public class TreeCanvas extends JPanel {
 
             @Override
             public void mouseDragged(MouseEvent e) {
-                if (drag != null) {
+                if (onMini) lookAtMini(e.getPoint());
+                else if (drag != null) {
                     drag.x = dragX + (int) Math.round((e.getX() - start.x) / zoom);
                     drag.y = dragY + (int) Math.round((e.getY() - start.y) / zoom);
                     onMoved.run();
@@ -101,6 +113,21 @@ public class TreeCanvas extends JPanel {
         zoom = 1;
         centered = false;
         repaint();
+    }
+
+    /** Centres the view on the world point under {@code p} in the minimap. */
+    private void lookAtMini(Point p) {
+        double[] b = miniWorld();
+        double k = mini.width / (b[1] - b[0]);
+        offX = getWidth() / 2.0 - (b[0] + (p.x - mini.x) / k) * zoom;
+        offY = getHeight() / 2.0 - (b[2] + (p.y - mini.y) / k) * zoom;
+        repaint();
+    }
+
+    /** Tree bounds with a margin, as shown by the minimap: {minX, maxX, minY, maxY}. */
+    private double[] miniWorld() {
+        double[] b = treeBounds();
+        return new double[]{b[0] - 120, b[1] + 120, b[2] - 120, b[3] + 120};
     }
 
     /** World position of the view centre, for placing new nodes. */
@@ -155,7 +182,7 @@ public class TreeCanvas extends JPanel {
 
     @Override
     public String getToolTipText(MouseEvent e) {
-        Node n = nodeAt(e.getPoint());
+        Node n = minimap && mini.contains(e.getPoint()) ? null : nodeAt(e.getPoint());
         if (n == null) return null;
         return "<html><b>" + esc(n.name) + "</b><br>" + esc(n.description).replace("\n", "<br>")
                 + "<br><i>" + esc(I18n.t("info.perSecond", Fmt.num(n.income), tree.currency)) + ", "
@@ -187,8 +214,17 @@ public class TreeCanvas extends JPanel {
         double[] b = treeBounds();
         double pad = 140;
         double tz = Math.min(1.5, Math.min(getWidth() / (b[1] - b[0] + pad * 2), getHeight() / (b[3] - b[2] + pad * 2)));
-        double tx = getWidth() / 2.0 - (b[0] + b[1]) / 2 * tz, ty = getHeight() / 2.0 - (b[2] + b[3]) / 2 * tz;
-        double z0 = zoom, x0 = offX, y0 = offY, seconds = 3;
+        animateTo(tz, (b[0] + b[1]) / 2, (b[2] + b[3]) / 2, 3, done);
+    }
+
+    /** Smoothly pans so {@code n} is in the middle of the view, keeping the zoom. */
+    public void focus(Node n) {
+        animateTo(zoom, n.x, n.y, .6, () -> {});
+    }
+
+    private void animateTo(double tz, double worldX, double worldY, double seconds, Runnable done) {
+        double tx = getWidth() / 2.0 - worldX * tz, ty = getHeight() / 2.0 - worldY * tz;
+        double z0 = zoom, x0 = offX, y0 = offY;
         long start = System.nanoTime();
         Timer t = new Timer(16, null);
         t.addActionListener(e -> {
@@ -228,7 +264,10 @@ public class TreeCanvas extends JPanel {
                 if (p != null) paintLink(g, p, n);
             }
         for (Node n : tree.nodes.values()) paintNode(g, n);
+        if (goal != null) paintGoalRing(g, goal);
         g.setTransform(screen);
+        if (goal != null) paintGoalArrow(g, goal);
+        if (minimap && !tree.nodes.isEmpty()) paintMinimap(g);
         paintPops(g);
         g.dispose();
     }
@@ -321,6 +360,65 @@ public class TreeCanvas extends JPanel {
         text(g, clip(g, subtitle.apply(n), 170), x, y + s + 39, Theme.GOLD);
     }
 
+    private static double pulse() {
+        return System.currentTimeMillis() % 1200 / 1200.0;
+    }
+
+    private void paintGoalRing(Graphics2D g, Node n) {
+        double p = pulse(), r = size(n) * (n.shape == Node.Shape.SQUARE ? 1.4 : 1) + 12 + 14 * p;
+        g.setStroke(new BasicStroke(3f));
+        g.setColor(Theme.alpha(Theme.GOLD, (int) (220 * (1 - p))));
+        g.draw(new Ellipse2D.Double(n.x - r, n.y - r, r * 2, r * 2));
+    }
+
+    /** When the goal is off screen, a gold arrow at the edge points the way. */
+    private void paintGoalArrow(Graphics2D g, Node n) {
+        Point at = toScreen(n);
+        int w = getWidth(), h = getHeight(), m = 60;
+        if (at.x > m && at.x < w - m && at.y > m && at.y < h - m) return;
+        double cx = w / 2.0, cy = h / 2.0, dx = at.x - cx, dy = at.y - cy;
+        double k = Math.min((w / 2.0 - m) / Math.max(1e-9, Math.abs(dx)), (h / 2.0 - m) / Math.max(1e-9, Math.abs(dy)));
+        double x = cx + dx * k, y = cy + dy * k, a = Math.atan2(dy, dx), len = 22 + 5 * Math.sin(pulse() * 2 * Math.PI);
+        Path2D head = new Path2D.Double();
+        head.moveTo(x + len * Math.cos(a), y + len * Math.sin(a));
+        head.lineTo(x + 14 * Math.cos(a + 2.4), y + 14 * Math.sin(a + 2.4));
+        head.lineTo(x + 14 * Math.cos(a - 2.4), y + 14 * Math.sin(a - 2.4));
+        head.closePath();
+        g.setColor(Theme.alpha(Theme.GOLD, 70));
+        g.setStroke(new BasicStroke(10f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.draw(head);
+        g.setColor(Theme.GOLD);
+        g.fill(head);
+    }
+
+    private void paintMinimap(Graphics2D g) {
+        double[] b = miniWorld();
+        double k = Math.min(200 / (b[1] - b[0]), 150 / (b[3] - b[2]));
+        int mw = (int) ((b[1] - b[0]) * k), mh = (int) ((b[3] - b[2]) * k);
+        mini = new Rectangle(16, getHeight() - 16 - mh, mw, mh);
+        RoundRectangle2D box = new RoundRectangle2D.Double(mini.x - 6, mini.y - 6, mw + 12, mh + 12, 14, 14);
+        g.setColor(Theme.alpha(Theme.BG, 210));
+        g.fill(box);
+        g.setColor(Theme.alpha(Theme.ACCENT, 90));
+        g.setStroke(new BasicStroke(1.2f));
+        g.draw(box);
+        for (Node n : tree.nodes.values()) {
+            double d = n.shape == Node.Shape.HEXAGON ? 6 : 3.5;
+            g.setColor(Theme.mix(fill.apply(n), Theme.MUTED, .35)); // lighter, so locked nodes still show
+            g.fill(new Ellipse2D.Double(mini.x + (n.x - b[0]) * k - d / 2, mini.y + (n.y - b[2]) * k - d / 2, d, d));
+        }
+        if (goal != null) {
+            g.setColor(Theme.GOLD);
+            g.draw(new Ellipse2D.Double(mini.x + (goal.x - b[0]) * k - 5, mini.y + (goal.y - b[2]) * k - 5, 10, 10));
+        }
+        java.awt.Shape clip = g.getClip();
+        g.clip(box);
+        g.setColor(Theme.alpha(Color.WHITE, 200));
+        g.draw(new Rectangle2D.Double(mini.x + (-offX / zoom - b[0]) * k, mini.y + (-offY / zoom - b[2]) * k,
+                getWidth() / zoom * k, getHeight() / zoom * k));
+        g.setClip(clip);
+    }
+
     private void paintPops(Graphics2D g) {
         long now = System.currentTimeMillis();
         pops.removeIf(p -> now - p.born > 1000);
@@ -350,8 +448,8 @@ public class TreeCanvas extends JPanel {
     private static String clip(Graphics2D g, String s, int max) {
         FontMetrics fm = g.getFontMetrics();
         if (fm.stringWidth(s) <= max) return s;
-        while (!s.isEmpty() && fm.stringWidth(s + "â€¦") > max) s = s.substring(0, s.length() - 1);
-        return s + "â€¦";
+        while (!s.isEmpty() && fm.stringWidth(s + "…") > max) s = s.substring(0, s.length() - 1);
+        return s + "…";
     }
 
     private static float mod(float a, float m) {

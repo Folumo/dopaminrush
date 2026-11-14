@@ -42,13 +42,7 @@ public final class Mods {
             try {
                 Properties next = (Properties) merged.clone();
                 Path modTree = mod.resolve("tree.properties");
-                if (Files.exists(modTree)) {
-                    Properties mp = Tree.read(modTree);
-                    Set<String> ids = new LinkedHashSet<>(Tree.split(next.getProperty("nodes", "")));
-                    ids.addAll(Tree.split(mp.getProperty("nodes", "")));
-                    next.putAll(mp);
-                    next.setProperty("nodes", String.join(",", ids));
-                }
+                if (Files.exists(modTree)) merge(next, Tree.read(modTree));
                 translate(next, modTree); // a mod can also be just a translation: only tree_<lang>.properties
                 Tree t = Tree.fromProperties(next);
                 check(t, next);
@@ -72,6 +66,34 @@ public final class Mods {
             }
         }
         return m;
+    }
+
+    /** Lays a mod's tree over {@code target}: its keys win, and its node ids are added to the list. */
+    public static void merge(Properties target, Properties mod) {
+        Set<String> ids = new LinkedHashSet<>(Tree.split(target.getProperty("nodes", "")));
+        ids.addAll(Tree.split(mod.getProperty("nodes", "")));
+        target.putAll(mod);
+        target.setProperty("nodes", String.join(",", ids));
+    }
+
+    /**
+     * What a mod's tree.properties should contain after editing {@code tree} (main tree + mod) in the editor:
+     * the mod's own nodes, written fresh, plus every other key the mod already had (like overrides of main-tree texts).
+     */
+    public static Properties modPart(Properties original, Tree tree, Set<String> baseIds, String baseCurrency) {
+        Properties out = (Properties) original.clone();
+        for (String id : Tree.split(original.getProperty("nodes", "")))
+            out.keySet().removeIf(k -> ((String) k).startsWith(id + "."));
+        List<String> ids = new ArrayList<>();
+        for (Node n : tree.nodes.values())
+            if (!baseIds.contains(n.id)) {
+                Tree.put(out, n);
+                ids.add(n.id);
+            }
+        out.setProperty("nodes", String.join(",", ids));
+        if (tree.currency.equals(baseCurrency)) out.remove("currency");
+        else out.setProperty("currency", tree.currency);
+        return out;
     }
 
     /** Lays {@code tree_<lang>.properties} (names, descriptions, currency) over the English texts, if that file exists. */

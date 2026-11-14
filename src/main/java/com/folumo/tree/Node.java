@@ -15,8 +15,19 @@ public final class Node {
     public double cost;
     public double income;     // currency per second once owned
     public double clickBonus; // added to each manual click once owned
+    /** How many times it can be bought; each level adds the income and click bonus again. */
+    public int maxLevel = 1;
     public int x, y;
     public final Set<String> requires = new LinkedHashSet<>();
+
+    /** Level cap used when a tree doesn't set {@code max}: normal nodes repeat the most, milestones once. */
+    public static int defaultMax(Shape s) {
+        return switch (s) {
+            case SQUARE -> 10;
+            case CIRCLE -> 5;
+            case HEXAGON -> 1;
+        };
+    }
 
     public Node(String id, String name) {
         this.id = id;

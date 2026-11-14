@@ -51,3 +51,37 @@ apps.forEach { (name, main) ->
     }
     tasks.assemble { dependsOn(jar) }
 }
+
+// gradlew packageGame: a "Dopamin Rush" app folder with its own Java, the icon and the tree files, zipped in build/package.
+// Players unzip it and start "Dopamin Rush.exe". With the WiX toolset installed, -PinstallerType=exe (or msi) builds an installer.
+val iconDir = layout.buildDirectory.dir("package/icon")
+val makeIcon = tasks.register<JavaExec>("makeIcon") {
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.folumo.tree.GameIcon")
+    args(iconDir.get().asFile.path)
+    outputs.dir(iconDir)
+    doFirst { iconDir.get().asFile.mkdirs() }
+}
+val packageInput = tasks.register<Sync>("packageInput") {
+    from(tasks.named("gameJar"))
+    from(rootDir) { include("tree*.properties", "credits*.txt", "ending*.mp4") }
+    into(layout.buildDirectory.dir("package/input"))
+}
+val packageGame = tasks.register<Exec>("packageGame") {
+    group = "distribution"
+    dependsOn(packageInput, makeIcon)
+    val type = (findProperty("installerType") as String?) ?: "app-image"
+    val out = layout.buildDirectory.dir("package/out").get().asFile
+    doFirst { delete(out) }
+    commandLine("jpackage", "--type", type, "--name", "Dopamin Rush", "--app-version", "1.0.0",
+        "--input", layout.buildDirectory.dir("package/input").get().asFile.path,
+        "--main-jar", "${rootProject.name}-game.jar", "--main-class", "com.folumo.game.GameApp",
+        "--icon", iconDir.get().file("icon.ico").asFile.path, "--dest", out.path)
+}
+tasks.register<Zip>("zipGame") {
+    group = "distribution"
+    dependsOn(packageGame)
+    from(layout.buildDirectory.dir("package/out"))
+    archiveFileName.set("DopaminRush-windows.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("package"))
+}

@@ -54,6 +54,32 @@ class ModsTest {
         assertEquals(java.util.Set.of("a"), m.tree.nodes.get("b").requires);
     }
 
+    /** The editor's mod mode saves only the mod's nodes and keeps its other keys. */
+    @Test
+    void editorSavesOnlyTheModPart() {
+        java.util.Properties base = new java.util.Properties(), mod = new java.util.Properties();
+        base.setProperty("currency", "Energy");
+        base.setProperty("nodes", "a");
+        base.setProperty("a.name", "Start");
+        mod.setProperty("nodes", "m_old");
+        mod.setProperty("m_old.name", "Deleted in the editor");
+        mod.setProperty("a.desc", "override kept");
+        java.util.Properties merged = (java.util.Properties) base.clone();
+        Mods.merge(merged, mod);
+        Tree t = Tree.fromProperties(merged);
+        t.remove("m_old");
+        Node added = t.add(10, 20, "m_");
+        added.requires.add("a");
+
+        java.util.Properties out = Mods.modPart(mod, t, java.util.Set.of("a"), "Energy");
+        assertEquals(added.id, out.getProperty("nodes"));
+        assertEquals("a", out.getProperty(added.id + ".requires"));
+        assertNull(out.getProperty("m_old.name"), "deleted node is gone");
+        assertNull(out.getProperty("a.name"), "main-tree nodes aren't copied into the mod");
+        assertEquals("override kept", out.getProperty("a.desc"));
+        assertNull(out.getProperty("currency"), "unchanged currency isn't written");
+    }
+
     @Test
     void brokenModsAreSkippedNotFatal(@TempDir Path dir) throws Exception {
         Path tree = baseTree(dir);

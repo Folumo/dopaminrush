@@ -87,10 +87,33 @@ public final class GameIcon {
         return p;
     }
 
-    /** Saves the icon as PNG files, for shortcuts or a store page: {@code GameIcon <folder>}. */
+    /** Saves the icon as PNG files and a Windows icon.ico: {@code GameIcon <folder>}. */
     public static void main(String[] args) throws Exception {
         Path dir = Path.of(args.length > 0 ? args[0] : ".");
         for (int s : new int[]{16, 32, 64, 256, 512})
             ImageIO.write(draw(s), "png", dir.resolve("icon-" + s + ".png").toFile());
+        java.nio.file.Files.write(dir.resolve("icon.ico"), ico(16, 32, 48, 256));
+    }
+
+    /** A .ico file holding PNG images (supported since Windows Vista): a header, one entry per size, then the PNGs. */
+    static byte[] ico(int... sizes) throws java.io.IOException {
+        byte[][] pngs = new byte[sizes.length][];
+        for (int i = 0; i < sizes.length; i++) {
+            java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
+            ImageIO.write(draw(sizes[i]), "png", png);
+            pngs[i] = png.toByteArray();
+        }
+        java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(6 + 16 * sizes.length + java.util.Arrays.stream(pngs).mapToInt(p -> p.length).sum())
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        b.putShort((short) 0).putShort((short) 1).putShort((short) sizes.length);
+        int offset = 6 + 16 * sizes.length;
+        for (int i = 0; i < sizes.length; i++) {
+            int s = sizes[i] >= 256 ? 0 : sizes[i]; // 0 means 256
+            b.put((byte) s).put((byte) s).put((byte) 0).put((byte) 0).putShort((short) 1).putShort((short) 32)
+                    .putInt(pngs[i].length).putInt(offset);
+            offset += pngs[i].length;
+        }
+        for (byte[] p : pngs) b.put(p);
+        return b.array();
     }
 }

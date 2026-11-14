@@ -32,14 +32,18 @@ final class Ending {
     private final TreeCanvas canvas;
     private final Path video, credits;
     private final double nextMultiplier;
+    private final List<String[]> stats;
     private final Runnable onContinue, onReborn;
     private final JPanel overlay = new JPanel(new BorderLayout());
 
     /**
      * @param video   the ending video (mp4); skipped if missing or unplayable
      * @param credits text file, one line per credit line; lines starting with "# " are headings
+     * @param stats   {label, value} rows shown before the video
      */
-    Ending(JFrame frame, TreeCanvas canvas, Path video, Path credits, double nextMultiplier, Runnable onContinue, Runnable onReborn) {
+    Ending(JFrame frame, TreeCanvas canvas, Path video, Path credits, double nextMultiplier, List<String[]> stats,
+           Runnable onContinue, Runnable onReborn) {
+        this.stats = stats;
         this.frame = frame;
         this.canvas = canvas;
         this.video = video;
@@ -56,10 +60,48 @@ final class Ending {
         overlay.setVisible(true);
         canvas.selected = null;
         canvas.zoomToFit(() -> {
-            Timer pause = new Timer(2000, e -> playVideo()); // let the player take in the whole journey
+            Timer pause = new Timer(2000, e -> showStats()); // let the player take in the whole journey
             pause.setRepeats(false);
             pause.start();
         });
+    }
+
+    /** The player's numbers over the zoomed-out tree; a click moves on to the video. */
+    private void showStats() {
+        Theme.Card card = new Theme.Card();
+        StringBuilder rows = new StringBuilder("<html><table cellpadding='4'>");
+        for (String[] r : stats)
+            rows.append("<tr><td><font color='#8b93b0'>").append(esc(r[0])).append("</font></td><td align='right'><b>")
+                    .append(esc(r[1])).append("</b></td></tr>");
+        JComponent[] parts = {Theme.label(t("stats.title"), Theme.H2, Theme.GOLD),
+                Theme.label(rows.append("</table></html>").toString(), Theme.font(Font.PLAIN, 18), Color.WHITE),
+                Theme.label(t("stats.question"), Theme.font(Font.ITALIC, 18), Theme.TEXT),
+                Theme.label(t("stats.hint"), Theme.BODY, Theme.MUTED)};
+        for (JComponent c : parts) {
+            c.setAlignmentX(Component.LEFT_ALIGNMENT);
+            card.add(c);
+            card.add(Box.createVerticalStrut(14));
+        }
+        JPanel holder = new JPanel(new GridBagLayout());
+        holder.setOpaque(false);
+        holder.add(card);
+        MouseAdapter next = new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                overlay.remove(holder);
+                overlay.repaint();
+                playVideo();
+            }
+        };
+        holder.addMouseListener(next);
+        card.addMouseListener(next);
+        overlay.add(holder, BorderLayout.CENTER);
+        overlay.revalidate();
+        overlay.repaint();
+    }
+
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private void playVideo() {

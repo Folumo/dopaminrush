@@ -2,6 +2,7 @@
 
 ## Ending (buying "The Final Rush", node id `final`)
 - [x] Zoom the tree view all the way out so the whole journey is visible.
+- [x] Show the player's journey first: time played, Gather clicks, upgrades bought and Dopamine collected. Clicking moves on.
 - [x] Play a video **inside the game window** (JavaFX media). Put the video in `ending.mp4` next to `tree.properties`. If the file is missing or can't be played, the game skips straight to the credits.
 - [ ] **Record the video**: a real person explains the effects of dopamine addiction, how it has ended lives, and tries to shake the player into changing something in their own life. Use MP4 with H.264 video and AAC audio.
 - [x] After the video, roll the credits. Edit them in `credits.txt`; lines starting with `# ` are headings. Clicking skips the credits.
@@ -10,14 +11,24 @@
   - **Continue playing**: keep the current run.
   - **Get reborn**: start over with a permanent bonus. Rebirth 1 gives ×2 on all income and clicks, rebirth 2 gives ×3, and so on. Tune it with `REBIRTH_BONUS` in `GameState`.
 
+## Progression
+- [x] Nodes can be bought several times, up to a level cap (`max` in the tree; default 10 for squares, 5 for circles, 1 for hexagons). Each level costs 1.3× the one before (`LEVEL_COST_GROWTH` in `GameState`).
+- [x] Pacing: `PacingTest` plays the whole tree with a bot that clicks once per second and always buys the quickest payoff. It reaches The Final Rush in about 5 hours. The test fails if that drifts outside 3–12 hours. To see the milestone times: `gradlew test --tests *PacingTest -i`.
+- [ ] Play it yourself to check the feel. The bot doesn't get bored, so a few stretches may feel slower than the numbers suggest.
+
+## Helping the player
+- [x] "Next goal" button and a pulsing gold ring (or an arrow at the edge of the screen) on the best thing to buy next. It can be turned off in Settings.
+- [x] Minimap in the bottom-left corner. Click or drag in it to jump around the tree.
+- [x] "Welcome back" card showing what was earned while the game was closed.
+
 ## Break reminders
 - [x] After every 30 minutes of play (30 min, 1 h, 1 h 30, …), a card on the left side of the game window kindly suggests a break. It closes with "Okay" or hides by itself after a minute.
 
 ## Mods
-- [x] Optional `mods/` folder next to `tree.properties`. Mods can add nodes or whole branches, change any key of existing nodes, and replace sound effects. Translations come once i18n is done.
+- [x] Optional `mods/` folder next to `tree.properties`. Mods can add nodes or whole branches, change any key of existing nodes, and replace sound effects.
 - [x] Mods load at startup in alphabetical order. A broken mod is skipped and listed in a warning. Settings shows the loaded mods and has an "Open mods folder" button.
 - [x] Guide: [MODDING.md](MODDING.md), with an example mod in [docs/example-mod](docs/example-mod).
-- [ ] Let the tree editor open the main tree plus a mod, so modders can link to main-tree nodes visually and save only the mod's part.
+- [x] The tree editor opens the main tree plus a mod ("Open mod..."), so modders can link to main-tree nodes visually and save only the mod's part.
 - [x] Mods can translate their nodes (or the main tree) with `tree_<lang>.properties`.
 
 ## Localisation (i18n)
@@ -28,3 +39,8 @@
 - [ ] Have native speakers proofread the four translations. They were written by Claude.
 - [ ] Translated credits (`credits_hr.txt`, …) once the real names are in `credits.txt`.
 - [ ] The tree editor is still English only (it's a tool for creators, not players).
+
+## Release
+- [x] Icon drawn in code (`GameIcon`), used by both windows. PNGs and `icon.ico` are in [docs/icon](docs/icon).
+- [x] `gradlew zipGame` builds `build/package/DopaminRush-windows.zip`: a "Dopamin Rush" folder with its own Java, so players don't need Java installed. They unzip it and start `Dopamin Rush.exe`. If the game folder isn't writable, progress is saved in `%USERPROFILE%\.dopaminrush\` instead.
+- [ ] For a real installer (Start-menu shortcut, uninstaller), install the WiX Toolset and run `gradlew zipGame -PinstallerType=exe`. Note: mods would then live inside the install folder, which isn't writable under Program Files.
