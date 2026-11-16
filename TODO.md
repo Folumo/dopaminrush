@@ -21,6 +21,22 @@
 - [x] Fog of war: you see what you own and what you can buy next. One step further shows as "???", and anything deeper is hidden. The ending reveals the whole tree. The depth is set by `SIGHT` in `GameApp`.
 - [x] Minimap in the bottom-left corner. Click or drag in it to jump around the tree.
 - [x] "Welcome back" card showing what was earned while the game was closed.
+- [x] Offline earnings start at 5% of income for up to 1 hour. The separate Autopilot side tree (right of Tyrosine) raises them to 80% and 24 hours. The next-goal hint never points there; it's the player's choice. Base values: `BASE_OFFLINE_RATE` / `BASE_OFFLINE_HOURS` in `GameState`.
+
+## The game watches back
+- [x] Quiet notes on the left when the game notices something: opening it 5+ times a day, playing between midnight and 5 am, 40+ clicks in 10 seconds, high tolerance, taking a mystery box. Each kind shows at most once per session. Notes, break reminders and achievements queue up instead of replacing each other.
+- [x] Tolerance: every purchase adds 2% (up to 80%), which fades over about 10 minutes. It makes purchase sounds lower and pop-ups greyer. Nodes with `calm=true` (Dopamine Detox and the Recovery branch) clear it.
+- [x] Mystery box: every 4–8 minutes a box next to the HUD offers a reward for 25% of your Dopamine, with a 20-second countdown. It always pays back less than it costs. Ignoring it gives a minute of income and a note.
+
+## Events, achievements and rebirth
+- [x] Golden molecule: every 1.5–3 minutes one drifts across the screen for 14 seconds. Catching it gives either a rush (×3 income and clicks for 30 s) or two minutes of income.
+- [x] 12 achievements, each +2% to everything forever. Some are self-aware ("Played after midnight on 3 different nights. Sleep is in the Recovery branch.").
+- [x] Rebirth gives 5 Insight, spent in the Journal on 4 permanent perks: start with Dopamine, keep the Autopilot tree, 10% cheaper per level, see one more step into the fog.
+- [x] Journal (bottom bar): lifetime stats, an income chart (log scale, last 4 hours of play), achievements and perks.
+
+## Polish
+- [x] Background sound for each era (drone and bubbles, heartbeat, fire, city, digital pings), made in code. It can be turned off in Settings.
+- [x] The big counter rolls to its new value, and buying a hexagon sends a ring of light across the tree.
 
 ## Break reminders
 - [x] After every 30 minutes of play (30 min, 1 h, 1 h 30, …), a card on the left side of the game window kindly suggests a break. It closes with "Okay" or hides by itself after a minute.

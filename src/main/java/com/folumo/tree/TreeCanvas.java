@@ -44,9 +44,16 @@ public class TreeCanvas extends JPanel {
     private final float[][] stars = new float[240][];
     private record Pop(String text, double x, double y, Color color, long born) {}
     private final List<Pop> pops = new ArrayList<>();
+    private record Ring(double x, double y, long born) {}
+    private final List<Ring> rings = new ArrayList<>();
+    /** Called with the click point when the player catches the golden molecule. */
+    public java.util.function.Consumer<Point> onBonus = p -> {};
+    private long bonusBorn = -1; // -1 = no golden molecule on screen
+    private double bonusY;
+    private static final double BONUS_MS = 14_000;
     private final Timer anim = new Timer(16, e -> {
         repaint();
-        if (pops.isEmpty()) ((Timer) e.getSource()).stop();
+        if (pops.isEmpty() && rings.isEmpty() && bonusAt() == null) ((Timer) e.getSource()).stop();
     });
 
     public TreeCanvas(Tree tree) {
@@ -67,6 +74,12 @@ public class TreeCanvas extends JPanel {
             @Override
             public void mousePressed(MouseEvent e) {
                 last = start = e.getPoint();
+                Point2D bonus = bonusAt();
+                if (bonus != null && bonus.distance(e.getPoint()) < 40) {
+                    bonusBorn = -1;
+                    onBonus.accept(e.getPoint());
+                    return;
+                }
                 onMini = minimap && mini.contains(e.getPoint());
                 if (onMini) {
                     lookAtMini(e.getPoint());
@@ -178,6 +191,30 @@ public class TreeCanvas extends JPanel {
         };
     }
 
+    /** Sends a golden molecule drifting across the view; catching it calls {@link #onBonus}. */
+    public void spawnBonus() {
+        bonusBorn = System.currentTimeMillis();
+        bonusY = getHeight() * (.3 + Math.random() * .4);
+        anim.start();
+    }
+
+    /** Where the golden molecule is now, in this component's coordinates; null when there is none. */
+    private Point2D bonusAt() {
+        if (bonusBorn < 0) return null;
+        double p = (System.currentTimeMillis() - bonusBorn) / BONUS_MS;
+        if (p >= 1) {
+            bonusBorn = -1;
+            return null;
+        }
+        return new Point2D.Double(-40 + p * (getWidth() + 80), bonusY + 40 * Math.sin(p * 14));
+    }
+
+    /** A ring of light that spreads out from a node across the tree. */
+    public void ring(Node n) {
+        rings.add(new Ring(n.x, n.y, System.currentTimeMillis()));
+        anim.start();
+    }
+
     /** Floating text that rises and fades, at a point in this component's coordinates. */
     public void pop(String text, Point at, Color color) {
         pops.add(new Pop(text, at.x, at.y, color, System.currentTimeMillis()));
@@ -270,7 +307,9 @@ public class TreeCanvas extends JPanel {
             }
         for (Node n : tree.nodes.values()) if (shown.test(n)) paintNode(g, n);
         if (goal != null) paintGoalRing(g, goal);
+        paintRings(g);
         g.setTransform(screen);
+        paintBonus(g);
         if (goal != null) paintGoalArrow(g, goal);
         if (minimap && !tree.nodes.isEmpty()) paintMinimap(g);
         paintPops(g);
@@ -366,6 +405,39 @@ public class TreeCanvas extends JPanel {
         text(g, clip(g, subtitle.apply(n), 170), x, y + s + 39, Theme.GOLD);
     }
 
+    private void paintRings(Graphics2D g) {
+        long now = System.currentTimeMillis();
+        rings.removeIf(r -> now - r.born > 1400);
+        for (Ring r : rings) {
+            double k = (now - r.born) / 1400.0, ease = 1 - Math.pow(1 - k, 3), rad = 50 + 900 * ease;
+            g.setStroke(new BasicStroke((float) (10 * (1 - k) + 2)));
+            g.setColor(Theme.alpha(Theme.GOLD, (int) (200 * (1 - k))));
+            g.draw(new Ellipse2D.Double(r.x - rad, r.y - rad, rad * 2, rad * 2));
+        }
+    }
+
+    /** The golden molecule: a small glowing hexagon ring with a bright core. */
+    private void paintBonus(Graphics2D g) {
+        Point2D b = bonusAt();
+        if (b == null) return;
+        double x = b.getX(), y = b.getY(), spin = (System.currentTimeMillis() - bonusBorn) / 900.0;
+        g.setPaint(new RadialGradientPaint(new Point2D.Double(x, y), 60, new float[]{0, 1},
+                new Color[]{Theme.alpha(Theme.GOLD, 150), Theme.alpha(Theme.GOLD, 0)}));
+        g.fill(new Ellipse2D.Double(x - 60, y - 60, 120, 120));
+        Path2D hex = new Path2D.Double();
+        for (int i = 0; i < 6; i++) {
+            double a = spin + Math.PI / 3 * i;
+            if (i == 0) hex.moveTo(x + 20 * Math.cos(a), y + 20 * Math.sin(a));
+            else hex.lineTo(x + 20 * Math.cos(a), y + 20 * Math.sin(a));
+        }
+        hex.closePath();
+        g.setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.setColor(Theme.GOLD);
+        g.draw(hex);
+        g.setColor(Color.WHITE);
+        g.fill(new Ellipse2D.Double(x - 6, y - 6, 12, 12));
+    }
+
     private static double pulse() {
         return System.currentTimeMillis() % 1200 / 1200.0;
     }
@@ -401,7 +473,7 @@ public class TreeCanvas extends JPanel {
         double[] b = miniWorld();
         double k = Math.min(200 / (b[1] - b[0]), 150 / (b[3] - b[2]));
         int mw = (int) ((b[1] - b[0]) * k), mh = (int) ((b[3] - b[2]) * k);
-        mini = new Rectangle(16, getHeight() - 16 - mh, mw, mh);
+        mini = new Rectangle(16, 16, mw, mh); // top-left corner
         RoundRectangle2D box = new RoundRectangle2D.Double(mini.x - 6, mini.y - 6, mw + 12, mh + 12, 14, 14);
         g.setColor(Theme.alpha(Theme.BG, 210));
         g.fill(box);

@@ -83,7 +83,7 @@ public final class Theme {
         protected void paintComponent(Graphics g0) {
             Graphics2D g = (Graphics2D) g0.create();
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setColor(new Color(10, 14, 32, 215));
+            g.setColor(new Color(10, 14, 32, 250)); // nearly opaque, so the tree behind never bleeds into the text
             g.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 24, 24);
             g.setColor(new Color(120, 150, 255, 70));
             g.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 24, 24);

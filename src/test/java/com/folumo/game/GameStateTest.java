@@ -125,6 +125,119 @@ class GameStateTest {
     }
 
     @Test
+    void offlineEarningsAreAShareOfIncomeForLimitedTime(@TempDir Path dir) throws Exception {
+        long tenHoursAgo = System.currentTimeMillis() - 10 * 3600_000L;
+        Path f = Files.writeString(dir.resolve("o.save"), "points=0\nowned=" + root.id + "\ntime=" + tenHoursAgo + "\n");
+        assertEquals(2 * 3600 * 0.05, GameState.load(tree, f).points, 0.01, "root's 2/s at 5%, capped at 1 hour");
+
+        child.offlineRate = 0.25;
+        child.offlineHours = 2;
+        Files.writeString(f, "points=0\nowned=" + root.id + "," + child.id + "\ntime=" + tenHoursAgo + "\n");
+        GameState s = GameState.load(tree, f);
+        assertEquals(0.30, s.offlineRate(), 1e-9);
+        assertEquals(3, s.offlineHours(), 1e-9);
+        assertEquals(2 * 3 * 3600 * 0.30, s.points, 0.01);
+
+        child.income = child.clickBonus = 0;
+        s.levels.remove(child.id);
+        s.points = 1e9;
+        assertNotSame(child, s.bestNext(0), "the next-goal hint skips offline-only upgrades");
+    }
+
+    @Test
+    void toleranceRisesWithPurchasesFadesAndCalmNodesClearIt() {
+        root.maxLevel = 50;
+        GameState s = new GameState(tree);
+        s.points = 1e12;
+        for (int i = 0; i < 10; i++) s.buy(root);
+        assertEquals(10 * GameState.TOLERANCE_PER_BUY, s.tolerance, 1e-9);
+        s.play(GameState.TOLERANCE_FADE_SECONDS);
+        assertEquals(10 * GameState.TOLERANCE_PER_BUY / Math.E, s.tolerance, 1e-9, "fades with time");
+        child.calm = true;
+        s.buy(child);
+        assertEquals(0, s.tolerance, "a calm node clears it");
+    }
+
+    @Test
+    void sessionsAndLateNightsAreCounted() {
+        GameState s = new GameState(tree);
+        java.time.LocalDateTime night = java.time.LocalDateTime.of(2026, 11, 15, 2, 30);
+        s.startSession(night);
+        s.startSession(night.plusHours(1));
+        assertEquals(2, s.sessionsToday);
+        assertEquals(1, s.lateNights, "one late night per day, however often");
+        s.startSession(night.plusDays(1).withHour(14));
+        assertEquals(1, s.sessionsToday, "a new day starts the count over");
+        assertEquals(1, s.lateNights);
+    }
+
+    @Test
+    void achievementsAreEarnedOnceAndBoostEverything() {
+        GameState s = new GameState(tree);
+        s.clicks = 1_000;
+        assertEquals(java.util.List.of(Achievement.CLICKS_1K), s.newAchievements());
+        assertTrue(s.newAchievements().isEmpty(), "only once");
+        assertEquals(1 + GameState.ACHIEVEMENT_BONUS, s.multiplier(), 1e-9);
+    }
+
+    @Test
+    void everyAchievementAndPerkHasTexts() {
+        com.folumo.tree.I18n.setLanguage("en");
+        for (Achievement a : Achievement.values())
+            for (String k : new String[]{a.key() + ".name", a.key() + ".text"})
+                assertFalse(com.folumo.tree.I18n.t(k).startsWith("!"), "missing " + k);
+        for (Perk p : Perk.values())
+            for (String k : new String[]{p.key() + ".name", p.key() + ".text"})
+                assertFalse(com.folumo.tree.I18n.t(k).startsWith("!"), "missing " + k);
+    }
+
+    @Test
+    void rebirthGivesInsightForPerks() {
+        GameState s = new GameState(tree);
+        s.levels.put(root.id, 1);
+        child.offlineRate = .1;
+        s.levels.put(child.id, 1);
+        s.reborn();
+        assertEquals(GameState.INSIGHT_PER_REBIRTH, s.insight);
+        assertTrue(s.buyPerk(Perk.KEEP_AUTOPILOT));
+        assertTrue(s.buyPerk(Perk.QUICKSTART));
+        assertFalse(s.buyPerk(Perk.SIGHT), "not enough Insight left");
+        assertFalse(s.buyPerk(Perk.KEEP_AUTOPILOT), "max level");
+        s.levels.put(root.id, 1);
+        s.levels.put(child.id, 1);
+        s.reborn();
+        assertEquals(1000, s.points, "quick start");
+        assertTrue(s.owns(child.id), "the offline-only node is kept");
+        assertFalse(s.owns(root.id));
+        assertTrue(s.buyPerk(Perk.DISCOUNT));
+        assertEquals(10 * (1 - GameState.DISCOUNT_PER_LEVEL), s.cost(root), 1e-9);
+    }
+
+    @Test
+    void newStatsSurviveSaving(@TempDir Path dir) throws Exception {
+        GameState s = new GameState(tree);
+        s.lateNights = 2;
+        s.offersRefused = 3;
+        s.molecules = 4;
+        s.tolerance = .3;
+        s.insight = 7;
+        s.perks.put(Perk.SIGHT, 1);
+        s.achievements.add(Achievement.REFUSED);
+        s.history.addAll(java.util.List.of(1.0, 2.5));
+        Path f = dir.resolve("s.save");
+        s.save(f);
+        GameState l = GameState.load(tree, f);
+        assertEquals(2, l.lateNights);
+        assertEquals(3, l.offersRefused);
+        assertEquals(4, l.molecules);
+        assertEquals(.3, l.tolerance, 1e-9);
+        assertEquals(7, l.insight);
+        assertEquals(1, l.perk(Perk.SIGHT));
+        assertEquals(java.util.Set.of(Achievement.REFUSED), l.achievements);
+        assertEquals(java.util.List.of(1.0, 2.5), l.history);
+    }
+
+    @Test
     void depthCountsStepsFromWhatIsOwned() {
         Node grandchild = tree.add(0, 0);
         grandchild.requires.add(child.id);

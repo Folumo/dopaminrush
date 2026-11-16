@@ -31,7 +31,7 @@ public final class EditorApp {
     private final JComboBox<Node.Shape> shape = new JComboBox<>(Node.Shape.values());
     private final JTextArea desc = new JTextArea(5, 18);
     private final JTextField cost = new JTextField(), income = new JTextField(), click = new JTextField(),
-            maxLevel = new JTextField(), requires = new JTextField();
+            maxLevel = new JTextField(), offline = new JTextField(), offlineHours = new JTextField(), requires = new JTextField();
     private final JLabel modeNote = new JLabel();
 
     // Mod mode: the main tree is shown read-only, and saving writes only the mod's own nodes.
@@ -121,6 +121,8 @@ public final class EditorApp {
                 {"Cost (first level)", cost}, {"Income per second (per level)", income}, {"Click bonus (per level)", click},
                 {"<html>Max level <font color=gray>(times it can be bought; each level costs<br>"
                         + String.format(java.util.Locale.ROOT, "%.1f", com.folumo.game.GameState.LEVEL_COST_GROWTH) + "x the one before)</font></html>", maxLevel},
+                {"<html>Offline earnings per level <font color=gray>(0.05 = +5%)</font></html>", offline},
+                {"Offline hours per level", offlineHours},
                 {"Requires (ids, comma separated)", requires}};
         for (Object[] r : rows) {
             p.add(new JLabel((String) r[0]), c);
@@ -152,9 +154,11 @@ public final class EditorApp {
         income.setText(n == null ? "" : Double.toString(n.income));
         click.setText(n == null ? "" : Double.toString(n.clickBonus));
         maxLevel.setText(n == null ? "" : Integer.toString(n.maxLevel));
+        offline.setText(n == null ? "" : Double.toString(n.offlineRate));
+        offlineHours.setText(n == null ? "" : Double.toString(n.offlineHours));
         requires.setText(n == null ? "" : String.join(", ", n.requires));
         boolean editable = n != null && !baseIds.contains(n.id);
-        for (JComponent f : new JComponent[]{name, shape, desc, cost, income, click, maxLevel, requires}) f.setEnabled(editable);
+        for (JComponent f : new JComponent[]{name, shape, desc, cost, income, click, maxLevel, offline, offlineHours, requires}) f.setEnabled(editable);
     }
 
     private void apply() {
@@ -162,7 +166,8 @@ public final class EditorApp {
         Node n = canvas.selected;
         if (n == null || baseIds.contains(n.id)) return;
         try {
-            double c = parse(cost, "Cost"), inc = parse(income, "Income"), cl = parse(click, "Click bonus"), max = parse(maxLevel, "Max level");
+            double c = parse(cost, "Cost"), inc = parse(income, "Income"), cl = parse(click, "Click bonus"), max = parse(maxLevel, "Max level"),
+                    off = parse(offline, "Offline earnings"), offH = parse(offlineHours, "Offline hours");
             if (c < 0) throw new IllegalArgumentException("Cost can't be negative.");
             if (max < 1 || max != Math.floor(max)) throw new IllegalArgumentException("Max level must be a whole number, 1 or more.");
             Set<String> req = new LinkedHashSet<>(Tree.split(requires.getText()));
@@ -177,6 +182,8 @@ public final class EditorApp {
             n.income = inc;
             n.clickBonus = cl;
             n.maxLevel = (int) max;
+            n.offlineRate = off;
+            n.offlineHours = offH;
             n.requires.clear();
             n.requires.addAll(req);
             changed();

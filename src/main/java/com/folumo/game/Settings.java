@@ -16,6 +16,7 @@ final class Settings {
     int volume = 70; // 0..100
     boolean popups = true;
     boolean goalHint = true; // ring and arrow on the best next purchase
+    boolean ambience = true; // looping background sound for the current era
     String language = I18n.systemLanguage();
 
     static Settings load(Path file) {
@@ -27,6 +28,7 @@ final class Settings {
             s.volume = Math.max(0, Math.min(100, Integer.parseInt(p.getProperty("volume", "70").trim())));
             s.popups = Boolean.parseBoolean(p.getProperty("popups", "true").trim());
             s.goalHint = Boolean.parseBoolean(p.getProperty("goalHint", "true").trim());
+            s.ambience = Boolean.parseBoolean(p.getProperty("ambience", "true").trim());
             String lang = p.getProperty("language", s.language).trim();
             s.language = I18n.LANGUAGES.contains(lang) ? lang : s.language;
         } catch (Exception e) {
@@ -42,6 +44,7 @@ final class Settings {
         p.setProperty("volume", Integer.toString(volume));
         p.setProperty("popups", Boolean.toString(popups));
         p.setProperty("goalHint", Boolean.toString(goalHint));
+        p.setProperty("ambience", Boolean.toString(ambience));
         p.setProperty("language", language);
         Tree.store(p, file, "Dopamin Rush settings");
     }

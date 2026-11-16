@@ -57,4 +57,17 @@ class SettingsAndSoundTest {
             assertTrue(peak > .05 && peak <= 1, s + " peak " + peak);
         }
     }
+
+    /** Background loops stay quiet under the effects (they're mixed at 60%) and loop without a click. */
+    @Test
+    void ambienceIsQuietAndLoopsCleanly() {
+        for (int era = 0; era < Sfx.ERAS; era++) {
+            float[] b = Sfx.ambience(era);
+            float peak = 0;
+            for (float v : b) peak = Math.max(peak, Math.abs(v));
+            assertTrue(peak > .02 && peak < .9, "era " + era + " peak " + peak);
+            assertEquals(0, b[0], 1e-6, "starts silent");
+            assertEquals(0, b[b.length - 1], 1e-3, "ends silent");
+        }
+    }
 }

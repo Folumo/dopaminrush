@@ -66,6 +66,9 @@ public final class Tree {
         p.setProperty(k + "click", Double.toString(n.clickBonus));
         p.setProperty(k + "shape", n.shape.name().toLowerCase(Locale.ROOT));
         p.setProperty(k + "max", Integer.toString(n.maxLevel));
+        if (n.offlineRate != 0) p.setProperty(k + "offline", Double.toString(n.offlineRate));
+        if (n.offlineHours != 0) p.setProperty(k + "offlineHours", Double.toString(n.offlineHours));
+        if (n.calm) p.setProperty(k + "calm", "true");
         p.setProperty(k + "x", Integer.toString(n.x));
         p.setProperty(k + "y", Integer.toString(n.y));
         p.setProperty(k + "requires", String.join(",", n.requires));
@@ -85,6 +88,9 @@ public final class Tree {
             n.cost = num(p, k + "cost");
             n.income = num(p, k + "income");
             n.clickBonus = num(p, k + "click");
+            n.offlineRate = num(p, k + "offline");
+            n.offlineHours = num(p, k + "offlineHours");
+            n.calm = Boolean.parseBoolean(p.getProperty(k + "calm", "false").trim());
             String shape = p.getProperty(k + "shape", "square").trim();
             try {
                 n.shape = Node.Shape.valueOf(shape.toUpperCase(Locale.ROOT));

@@ -37,6 +37,10 @@ final class Sfx {
     private final List<Voice> voices = new ArrayList<>();
     private final Map<Sound, float[]> replaced = new EnumMap<>(Sound.class);
     private volatile float gain = .5f;
+    private volatile float[] ambience; // looping background for the current era, or null
+    private int ambiencePos;            // only touched by the audio thread
+    private final Map<Integer, float[]> ambienceCache = new HashMap<>();
+    static final int ERAS = 5;
 
     /**
      * Replaces a built-in sound with a mod's WAV file.
@@ -99,6 +103,11 @@ final class Sfx {
         gain = v * v; // ears hear loudness roughly logarithmically
     }
 
+    /** @param era 0..ERAS-1 picks the looping background sound; -1 turns it off */
+    void setAmbience(int era) {
+        ambience = era < 0 ? null : ambienceCache.computeIfAbsent(Math.min(era, ERAS - 1), Sfx::ambience);
+    }
+
     void play(Sound s) {
         play(s, 1);
     }
@@ -132,6 +141,11 @@ final class Sfx {
                         }
                         if (v.pos >= v.data.length - 1) it.remove();
                     }
+                }
+                float[] amb = ambience;
+                if (amb != null) for (int i = 0; i < frames; i++) {
+                    if (ambiencePos >= amb.length) ambiencePos = 0;
+                    mix[i] += amb[ambiencePos++] * .6f; // quieter than the effects
                 }
                 float g = gain;
                 for (int i = 0; i < frames; i++) {
@@ -201,6 +215,79 @@ final class Sfx {
         double[] sparkle = {2093, 2637, 3136, 4186};
         for (int i = 0; i < sparkle.length; i++) note(b, sparkle[i], .3 + i * .09, .05, 6, .004);
         return b;
+    }
+
+    /**
+     * An 8-second loop for each era: 0 primordial soup, 1 bodies, 2 early humans, 3 civilisation, 4 the digital age.
+     * Drones use frequencies that fit the loop a whole number of times, and the ends fade, so the loop has no click.
+     */
+    static float[] ambience(int era) {
+        Random r = new Random(era * 31L + 7);
+        float[] b = buf(8);
+        switch (era) {
+            case 0 -> { // deep drone and bubbles
+                hum(b, .05, 55, 82.5);
+                for (int k = 0; k < 40; k++) {
+                    int s0 = r.nextInt(b.length - 6000);
+                    double f0 = 300 + r.nextDouble() * 500, amp = .03 + r.nextDouble() * .03, phase = 0;
+                    for (int i = 0; i < 4000; i++) {
+                        double t = i / RATE;
+                        phase += 2 * Math.PI * (f0 + 4000 * t) / RATE;
+                        b[s0 + i] += (float) (amp * Math.sin(Math.PI * i / 4000) * Math.sin(phase));
+                    }
+                }
+            }
+            case 1 -> { // a slow heartbeat over a body hum
+                hum(b, .03, 40);
+                for (int beat = 0; beat < 8; beat++) {
+                    note(b, 55, beat, .3, 18, .005);
+                    note(b, 50, beat + .28, .22, 18, .005);
+                }
+            }
+            case 2 -> { // fire: low rumble and crackles
+                noise(b, r, .02, .5);
+                for (int k = 0; k < 160; k++) {
+                    int s0 = r.nextInt(b.length - 400);
+                    double amp = .05 + r.nextDouble() * .2;
+                    for (int i = 0; i < 300; i++) b[s0 + i] += (float) (amp * (r.nextDouble() * 2 - 1) * Math.exp(-i / 40.0));
+                }
+            }
+            case 3 -> { // city: traffic hum and a distant horn
+                noise(b, r, .05, .25);
+                hum(b, .015, 100);
+                for (int k = 0; k < 2; k++) {
+                    double at = 1 + r.nextDouble() * 5;
+                    note(b, 330, at, .025, 2.5, .05);
+                    note(b, 415, at, .02, 2.5, .05);
+                }
+            }
+            default -> { // digital age: electrical hum and notification pings
+                hum(b, .02, 50, 100, 150);
+                double[] pings = {1568, 2093, 2637};
+                for (int k = 0; k < 10; k++) note(b, pings[r.nextInt(pings.length)], r.nextDouble() * 7.5, .04, 12, .003);
+            }
+        }
+        int fade = (int) (.03 * RATE);
+        for (int i = 0; i < fade; i++) {
+            b[i] *= i / (float) fade;
+            b[b.length - 1 - i] *= i / (float) fade;
+        }
+        return b;
+    }
+
+    /** Steady sine tones; each frequency should fit an 8 s loop a whole number of times (any multiple of 0.125 Hz). */
+    private static void hum(float[] b, double amp, double... freqs) {
+        for (int i = 0; i < b.length; i++)
+            for (double f : freqs) b[i] += (float) (amp * Math.sin(2 * Math.PI * f * i / RATE));
+    }
+
+    /** Low-passed noise: a small {@code smooth} gives a deep rumble. */
+    private static void noise(float[] b, Random r, double smooth, double amp) {
+        double y = 0;
+        for (int i = 0; i < b.length; i++) {
+            y += smooth * ((r.nextDouble() * 2 - 1) - y);
+            b[i] += (float) (amp * y);
+        }
     }
 
     private static float[] denied() { // low soft thud

@@ -15,6 +15,11 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 
@@ -47,6 +52,21 @@ public final class GameApp {
     /** Steps from what the player owns (see GameState.depths); nodes further than SIGHT are hidden. */
     private Map<String, Integer> depth = Map.of();
     private static final int SIGHT = 2;
+
+    private double shownPoints = Double.NaN; // the big counter rolls towards state.points
+    private final Deque<Long> recentClicks = new ArrayDeque<>();
+    private final Set<String> notedThisSession = new HashSet<>(); // each kind of quiet note at most once per session
+    private final Deque<String[]> noticeQueue = new ArrayDeque<>();
+    private final Timer rushEnd = new Timer(30_000, e -> state.boost = 1);
+    private JComponent settingsCard, layerCard; // layerCard: what the centre layer shows, settings or the journal
+    private int era = -2; // the ambience playing now; -1 = none, -2 = not decided yet
+
+    private final Theme.Card offerCard = new Theme.Card();
+    private final JLabel offerBody = Theme.label("", Theme.BODY, Theme.TEXT);
+    private final JButton offerOpen = Theme.button("", Theme.GOLD.darker());
+    private final Timer offerTick = new Timer(1000, e -> offerTick());
+    private int offerLeft;
+    private double offerPrice;
 
     public static void main(String[] args) {
         I18n.setLanguage(Settings.load(Settings.FILE).language);
@@ -102,14 +122,17 @@ public final class GameApp {
             Files.createDirectories(saveFile.getParent());
         }
         state = GameState.load(tree, saveFile);
+        state.startSession(LocalDateTime.now());
 
         canvas = new TreeCanvas(tree);
         canvas.fill = n -> state.owns(n.id) ? (state.canBuy(n) ? Theme.mix(Theme.GREEN, Theme.ACCENT, .5) : Theme.GREEN)
                 : !state.unlocked(n) ? Theme.LOCKED
                 : state.canBuy(n) ? Theme.ACCENT : Theme.PURPLE;
         // Fog of war: what you own, what you can buy next, and one more step as "???".
-        canvas.shown = n -> inEnding || depth.getOrDefault(n.id, 0) <= SIGHT;
-        canvas.mystery = n -> !inEnding && depth.getOrDefault(n.id, 0) == SIGHT;
+        canvas.shown = n -> inEnding || depth.getOrDefault(n.id, 0) <= sight();
+        canvas.mystery = n -> !inEnding && depth.getOrDefault(n.id, 0) == sight();
+        canvas.onBonus = this::caughtMolecule;
+        rushEnd.setRepeats(false);
         canvas.subtitle = n -> {
             if (canvas.mystery.test(n)) return "";
             String price = Fmt.num(state.cost(n)) + " " + state.tree.currency;
@@ -133,7 +156,10 @@ public final class GameApp {
         canvas.add(bottomBar(), BorderLayout.SOUTH);
         canvas.add(settingsPanel(), BorderLayout.CENTER);
         canvas.add(notices(), BorderLayout.WEST);
-        canvas.registerKeyboardAction(e -> toggleSettings(),
+        canvas.registerKeyboardAction(e -> {
+                    if (settingsLayer.isVisible()) closeLayer();
+                    else toggleSettings();
+                },
                 KeyStroke.getKeyStroke("ESCAPE"), JComponent.WHEN_IN_FOCUSED_WINDOW);
         applySound();
 
@@ -153,8 +179,14 @@ public final class GameApp {
             long now = System.nanoTime();
             state.play((now - last[0]) / 1e9);
             last[0] = now;
+            for (Achievement a : state.newAchievements()) announce(a);
+            updateAmbience();
             refresh();
         }).start();
+        later(90, 180, () -> canvas.spawnBonus());
+        later(240, 480, () -> {
+            if (state.points > 0 && !offerCard.isVisible()) showOffer();
+        });
         new Timer(15_000, e -> {
             try {
                 state.save(saveFile);
@@ -169,7 +201,10 @@ public final class GameApp {
         frame.setVisible(true);
         if (state.awaySeconds >= 60 && state.awayEarned > 0)
             notice(t("away.title"), t("away.body", I18n.duration((int) (state.awaySeconds / 60)),
-                    Fmt.num(state.awayEarned), esc(tree.currency)), t("away.ok"));
+                    Fmt.num(state.awayEarned), esc(tree.currency)) + "<br><br>" + offlineNow("away.limits"), t("away.ok"));
+        if (state.sessionsToday >= 5) note("returns", t("observe.returns", state.sessionsToday));
+        LocalDateTime now = LocalDateTime.now();
+        if (now.getHour() < 5) note("late", t("observe.lateNight", String.format("%d:%02d", now.getHour(), now.getMinute())));
         if (!mods.errors.isEmpty()) // the errors themselves stay in English: they're for mod makers
             JOptionPane.showMessageDialog(frame, t("mods.skipped") + "\n\n• " + String.join("\n• ", mods.errors),
                     t("mods.title"), JOptionPane.WARNING_MESSAGE);
@@ -181,14 +216,125 @@ public final class GameApp {
             l.setAlignmentX(Component.CENTER_ALIGNMENT);
             card.add(l);
         }
-        return floating(new FlowLayout(FlowLayout.CENTER, 0, 16), card);
+        JPanel row = floating(new FlowLayout(FlowLayout.CENTER, 16, 16), card);
+        row.add(offerCard());
+        return row;
+    }
+
+    /** A "mystery box" that sometimes pops up next to the HUD. Opening it always costs more than it gives. */
+    private JComponent offerCard() {
+        for (JComponent c : new JComponent[]{Theme.label(t("offer.title"), Theme.H2, Theme.GOLD), offerBody, offerOpen}) {
+            c.setAlignmentX(Component.LEFT_ALIGNMENT);
+            offerCard.add(c);
+            offerCard.add(Box.createVerticalStrut(8));
+        }
+        offerOpen.addActionListener(e -> takeOffer());
+        offerCard.setVisible(false);
+        return offerCard;
+    }
+
+    private void showOffer() {
+        offerPrice = state.points * .25;
+        offerLeft = 20;
+        offerOpen.setText(t("offer.open", Fmt.num(offerPrice)));
+        offerBody.setText("<html>" + t("offer.body", offerLeft) + "</html>");
+        offerCard.setVisible(true);
+        sfx.play(Sfx.Sound.BUY_IMPORTANT);
+        offerTick.restart();
+    }
+
+    private void offerTick() {
+        if (--offerLeft > 0) {
+            offerBody.setText("<html>" + t("offer.body", offerLeft) + "</html>");
+            return;
+        }
+        offerTick.stop(); // ignored to the end: a small reward for not taking the bait
+        offerCard.setVisible(false);
+        state.offersRefused++;
+        double gift = Math.max(state.income() * 60, state.clickValue() * 10);
+        state.points += gift;
+        state.earned += gift;
+        notice(t("observe.title"), t("observe.offerRefused", Fmt.num(gift), esc(state.tree.currency)), t("break.ok"));
+    }
+
+    private void takeOffer() {
+        offerTick.stop();
+        offerCard.setVisible(false);
+        if (state.points < offerPrice) {
+            sfx.play(Sfx.Sound.DENIED);
+            return;
+        }
+        double got = offerPrice * (.1 + .6 * Math.random()); // always less than the price
+        state.points += got - offerPrice;
+        state.offersTaken++;
+        sfx.play(Sfx.Sound.BUY);
+        canvas.pop("+" + Fmt.num(got), SwingUtilities.convertPoint(offerOpen, offerOpen.getWidth() / 2, 0, canvas), Theme.GOLD);
+        note("offerTaken", t("observe.offerTaken"));
+    }
+
+    /** The golden molecule was caught: either a rush (×3 for 30 s) or two minutes of income at once. */
+    private void caughtMolecule(Point at) {
+        state.molecules++;
+        sfx.play(Sfx.Sound.MILESTONE);
+        if (Math.random() < .5) {
+            state.boost = 3;
+            rushEnd.restart();
+            canvas.pop(t("event.rush"), at, Theme.GOLD);
+        } else {
+            double lump = Math.max(state.income() * 120, state.clickValue() * 30);
+            state.points += lump;
+            state.earned += lump;
+            canvas.pop("+" + Fmt.num(lump), at, Theme.GOLD);
+        }
+        refresh();
+    }
+
+    /** Runs {@code action} after a random delay between the bounds (seconds), then again, forever; skipped during the ending. */
+    private void later(int minSeconds, int maxSeconds, Runnable action) {
+        Timer t = new Timer(0, null);
+        t.addActionListener(e -> {
+            if (!inEnding) action.run();
+            t.setInitialDelay((minSeconds + (int) (Math.random() * (maxSeconds - minSeconds))) * 1000);
+            t.restart();
+        });
+        t.setRepeats(false);
+        t.setInitialDelay((minSeconds + (int) (Math.random() * (maxSeconds - minSeconds))) * 1000);
+        t.start();
+    }
+
+    /** A quiet note about how the game is being played; each kind shows at most once per session. */
+    private void note(String kind, String body) {
+        if (notedThisSession.add(kind)) notice(t("observe.title"), esc(body), t("break.ok"));
+    }
+
+    private void announce(Achievement a) {
+        notice(t("achievement.title", t(a.key() + ".name")), esc(t(a.key() + ".text")) + "<br><br><font color='#34d399'>"
+                + esc(t("achievement.bonus", Fmt.num(GameState.ACHIEVEMENT_BONUS * 100))) + "</font>", t("break.ok"));
+        sfx.play(Sfx.Sound.MILESTONE);
+    }
+
+    private int sight() {
+        return SIGHT + state.perk(Perk.SIGHT);
+    }
+
+    /** Eras follow the main tree's rows: the deepest node owned picks the background sound. */
+    private void updateAmbience() {
+        int deepest = 0;
+        for (String id : state.levels.keySet()) deepest = Math.max(deepest, state.tree.nodes.get(id).y);
+        // shortcut: the row bounds match the shipped tree; a mod tree with other rows gets roughly fitting eras
+        int e = !settings.sound || !settings.ambience ? -1
+                : deepest < 900 ? 0 : deepest < 1440 ? 1 : deepest < 1980 ? 2 : deepest < 2340 ? 3 : 4;
+        if (e != era) {
+            era = e;
+            sfx.setAmbience(e);
+        }
     }
 
     private final Theme.Card noticeCard = new Theme.Card();
     private final JLabel noticeTitle = Theme.label("", Theme.H2, Theme.GOLD);
     private final JLabel noticeBody = Theme.label("", Theme.BODY, Theme.TEXT);
     private final JButton noticeOk = Theme.button("", Theme.ACCENT);
-    private final Timer noticeHide = new Timer(60_000, e -> noticeCard.setVisible(false));
+    private final Timer noticeHide = new Timer(60_000, e -> hideNotice());
 
     /** A card on the left for the break reminder and the welcome back message; hides by itself after a minute. */
     private JComponent notices() {
@@ -199,11 +345,11 @@ public final class GameApp {
         }
         JPanel wrap = new JPanel(new BorderLayout());
         wrap.setOpaque(false);
-        wrap.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 0));
+        wrap.setBorder(BorderFactory.createEmptyBorder(40, 16, 16, 0)); // the HUD row is above this, so 40 clears the minimap
         wrap.add(noticeCard, BorderLayout.NORTH);
         noticeCard.setVisible(false);
         noticeHide.setRepeats(false);
-        noticeOk.addActionListener(e -> noticeCard.setVisible(false));
+        noticeOk.addActionListener(e -> hideNotice());
 
         int every = 30; // minutes of play between break reminders
         int[] played = {0};
@@ -215,13 +361,23 @@ public final class GameApp {
         return wrap;
     }
 
-    /** @param body may contain simple HTML */
+    /** @param body may contain simple HTML. Waits its turn if another notice is showing. */
     private void notice(String title, String body, String ok) {
+        if (noticeCard.isVisible()) {
+            noticeQueue.add(new String[]{title, body, ok});
+            return;
+        }
         noticeTitle.setText(title);
         noticeBody.setText("<html><div style='width:220px'>" + body + "</div></html>");
         noticeOk.setText(ok);
         noticeCard.setVisible(true);
         noticeHide.restart();
+    }
+
+    private void hideNotice() {
+        noticeCard.setVisible(false);
+        String[] next = noticeQueue.poll();
+        if (next != null) notice(next[0], next[1], next[2]);
     }
 
     private JComponent infoCard() {
@@ -243,6 +399,10 @@ public final class GameApp {
         gather.setBorder(BorderFactory.createEmptyBorder(16, 40, 16, 40));
         gather.addActionListener(e -> {
             state.click();
+            long now = System.currentTimeMillis();
+            recentClicks.add(now);
+            while (recentClicks.peek() < now - 10_000) recentClicks.poll();
+            if (recentClicks.size() >= 40) note("clicks", t("observe.clicks", recentClicks.size()));
             sfx.play(Sfx.Sound.GATHER, .9 + Math.random() * .25);
             Point at = SwingUtilities.convertPoint(gather, gather.getWidth() / 2 + (int) (Math.random() * 80 - 40), 0, canvas);
             if (settings.popups) canvas.pop("+" + Fmt.num(state.clickValue()), at, Theme.GOLD);
@@ -258,10 +418,13 @@ public final class GameApp {
             sfx.play(Sfx.Sound.SELECT);
             refresh();
         });
+        JButton journal = Theme.button(t("journal.button"), new Color(0x374151));
+        journal.addActionListener(e -> toggleJournal());
         JButton open = Theme.button(t("settings.open"), new Color(0x374151));
         open.addActionListener(e -> toggleSettings());
         JPanel bar = floating(new FlowLayout(FlowLayout.CENTER, 16, 20), goal);
         bar.add(gather);
+        bar.add(journal);
         bar.add(open);
         return bar;
     }
@@ -273,6 +436,12 @@ public final class GameApp {
         volume.setOpaque(false);
         volume.setEnabled(settings.sound);
         JCheckBox popups = check(t("settings.popups"), settings.popups);
+        JCheckBox ambience = check(t("settings.ambience"), settings.ambience);
+        ambience.addActionListener(e -> {
+            settings.ambience = ambience.isSelected();
+            saveSettings();
+            updateAmbience();
+        });
         JCheckBox goalHint = check(t("settings.goal"), settings.goalHint);
         goalHint.addActionListener(e -> {
             settings.goalHint = goalHint.isSelected();
@@ -359,7 +528,7 @@ public final class GameApp {
         });
 
         JComponent[] rows = {Theme.label(t("settings.title"), Theme.H2, Color.WHITE), sound,
-                Theme.label(t("settings.volume"), Theme.BODY, Theme.MUTED), volume, popups, goalHint,
+                Theme.label(t("settings.volume"), Theme.BODY, Theme.MUTED), volume, ambience, popups, goalHint,
                 Theme.label(t("settings.language"), Theme.BODY, Theme.MUTED), language,
                 Theme.label(t("mods.heading"), Theme.BODY, Theme.MUTED), modList, openMods,
                 row(save, exit), row(reset, close)};
@@ -373,6 +542,7 @@ public final class GameApp {
         }
         settingsLayer.setOpaque(false);
         settingsLayer.add(card);
+        settingsCard = layerCard = card;
         settingsLayer.setVisible(false);
         return settingsLayer;
     }
@@ -387,12 +557,38 @@ public final class GameApp {
         return p;
     }
 
-    /** Opening settings closes the node info card so the two don't overlap. */
-    private void toggleSettings() {
-        boolean open = !settingsLayer.isVisible();
-        if (open) canvas.selected = null;
-        settingsLayer.setVisible(open);
+    /** The centre layer shows settings or the journal. Opening it closes the node info card so the two don't overlap. */
+    private void showLayer(JComponent card) {
+        settingsLayer.removeAll();
+        settingsLayer.add(card);
+        layerCard = card;
+        canvas.selected = null;
+        settingsLayer.setVisible(true);
+        settingsLayer.revalidate();
+        settingsLayer.repaint();
         refresh();
+    }
+
+    private void closeLayer() {
+        settingsLayer.setVisible(false);
+        refresh();
+    }
+
+    private void toggleSettings() {
+        if (settingsLayer.isVisible() && layerCard == settingsCard) closeLayer();
+        else showLayer(settingsCard);
+    }
+
+    private void toggleJournal() {
+        if (settingsLayer.isVisible() && layerCard != settingsCard) closeLayer();
+        else showLayer(journal());
+    }
+
+    private JComponent journal() {
+        return Journal.build(state, () -> {
+            sfx.play(Sfx.Sound.MILESTONE);
+            showLayer(journal()); // rebuilt with the new levels and Insight
+        }, this::closeLayer, canvas.getHeight() - 290); // room between the HUD and the bottom bar
     }
 
     /** @return true if saved; shows the error otherwise */
@@ -435,6 +631,7 @@ public final class GameApp {
 
     private void applySound() {
         sfx.setVolume(settings.sound ? settings.volume : 0);
+        updateAmbience();
     }
 
     private void saveSettings() {
@@ -459,15 +656,18 @@ public final class GameApp {
             return;
         }
         int lvl = state.level(n);
+        // tolerance: the more you've bought lately, the duller each purchase sounds and looks
         sfx.play(switch (n.shape) {
             case SQUARE -> Sfx.Sound.BUY;
             case CIRCLE -> Sfx.Sound.BUY_IMPORTANT;
             case HEXAGON -> Sfx.Sound.MILESTONE;
-        });
+        }, 1 - .35 * state.tolerance);
         Point at = canvas.toScreen(n);
         at.translate(0, -TreeCanvas.size(n));
         if (settings.popups) canvas.pop(lvl > 1 ? t("pop.level", lvl)
-                : t(n.shape == Node.Shape.HEXAGON ? "pop.milestone" : "pop.unlocked"), at, Theme.GREEN);
+                : t(n.shape == Node.Shape.HEXAGON ? "pop.milestone" : "pop.unlocked"), at, Theme.mix(Theme.GREEN, Theme.MUTED, state.tolerance));
+        if (n.shape == Node.Shape.HEXAGON) canvas.ring(n);
+        if (state.tolerance >= .5) note("tolerance", t("observe.tolerance"));
         if (n.id.equals("final") && lvl == 1) startEnding();
     }
 
@@ -476,6 +676,8 @@ public final class GameApp {
         saveProgress();
         settingsLayer.setVisible(false);
         noticeCard.setVisible(false);
+        offerTick.stop();
+        offerCard.setVisible(false);
         canvas.minimap = false; // just the tree for the ending
         inEnding = true;
         Runnable backToTree = () -> {
@@ -503,9 +705,11 @@ public final class GameApp {
     private void refresh() {
         String cur = state.tree.currency;
         depth = state.depths();
-        points.setText(Fmt.num(state.points));
+        shownPoints = Double.isNaN(shownPoints) ? state.points : shownPoints + (state.points - shownPoints) * .35;
+        if (Math.abs(state.points - shownPoints) <= Math.abs(state.points) * 1e-4 + .05) shownPoints = state.points;
+        points.setText(Fmt.num(shownPoints));
         currency.setText(state.rebirths == 0 ? cur : t("hud.rebirth", cur, state.rebirths, Fmt.num(state.multiplier())));
-        income.setText(t("hud.perSecond", Fmt.num(state.income())));
+        income.setText(t("hud.perSecond", Fmt.num(state.income())) + (state.boost > 1 ? "   " + t("hud.rush") : ""));
         gather.setText(t("gather", Fmt.num(state.clickValue())));
         canvas.goal = settings.goalHint && !inEnding ? state.bestNext(1) : null;
 
@@ -520,6 +724,10 @@ public final class GameApp {
             else if (!n.description.isBlank()) sb.append(esc(n.description).replace("\n", "<br>")).append("<br><br>");
             if (n.income > 0 && !mystery) sb.append("<font color='#34d399'>").append(esc(t("info.perSecond", Fmt.num(n.income), cur))).append("</font><br>");
             if (n.clickBonus > 0 && !mystery) sb.append("<font color='#fcd34d'>").append(esc(t("info.perClick", Fmt.num(n.clickBonus)))).append("</font><br>");
+            if (n.offlineRate > 0 && !mystery) sb.append("<font color='#7c6fc4'>").append(esc(t("info.offlineRate", Fmt.num(n.offlineRate * 100)))).append("</font><br>");
+            if (n.offlineHours > 0 && !mystery) sb.append("<font color='#7c6fc4'>").append(esc(t("info.offlineHours", I18n.duration((int) Math.round(n.offlineHours * 60))))).append("</font><br>");
+            if ((n.offlineRate > 0 || n.offlineHours > 0) && !mystery) sb.append("<font color='#8b93b0'>").append(offlineNow("info.offlineNow")).append("</font><br>");
+            if (n.calm && !mystery) sb.append("<font color='#34d399'>").append(esc(t("info.calm"))).append("</font><br>");
             if (n.maxLevel > 1 && !mystery) sb.append("<font color='#8b93b0'>").append(esc(t("info.level", lvl, n.maxLevel))).append("</font><br>");
             if (!n.requires.isEmpty()) {
                 sb.append("<br><font color='#8b93b0'>").append(esc(t("info.requires"))).append("</font><br>");
@@ -539,6 +747,11 @@ public final class GameApp {
             buy.setEnabled(state.canBuy(n));
         }
         canvas.repaint();
+    }
+
+    /** The current offline share and time, in the message {@code key}. */
+    private String offlineNow(String key) {
+        return esc(t(key, Fmt.num(state.offlineRate() * 100), I18n.duration((int) Math.round(state.offlineHours() * 60))));
     }
 
     private static String esc(String s) {

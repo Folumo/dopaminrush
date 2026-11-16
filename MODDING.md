@@ -35,6 +35,9 @@ The format is the same as the main `tree.properties`. List your new node ids in 
 | `income` | Dopamine per second, per level |
 | `click` | Extra Dopamine per Gather click, per level |
 | `shape` | `square` (normal), `circle` (important) or `hexagon` (milestone) |
+| `offline` | Share of income earned while the game is closed, per level (`0.05` = +5%). Players start at 5% |
+| `offlineHours` | Extra hours the game keeps earning while closed, per level. Players start at 1 hour |
+| `calm` | `true` makes buying the node clear the player's tolerance (see below) |
 | `max` | How many times it can be bought. Each level adds the income and click bonus again and costs 1.3× the one before. Default: 10 for squares, 5 for circles, 1 for hexagons |
 | `x`, `y` | Position of the node's centre. The main tree's rows are 180 apart. |
 | `requires` | Comma-separated ids that must be bought first |

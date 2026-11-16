@@ -171,7 +171,8 @@ final class Ending {
     private void showChoice(Credits roll) {
         Theme.Card card = new Theme.Card();
         JLabel title = Theme.label(t("ending.title"), Theme.H2, Color.WHITE);
-        JLabel text = Theme.label("<html><div style='width:320px'>" + t("ending.text", Fmt.num(nextMultiplier)) + "</div></html>",
+        JLabel text = Theme.label("<html><div style='width:320px'>" + t("ending.text", Fmt.num(nextMultiplier))
+                + " " + t("ending.insight", GameState.INSIGHT_PER_REBIRTH) + "</div></html>",
                 Theme.BODY, Theme.TEXT);
         JButton keep = Theme.button(t("ending.continue"), new Color(0x374151));
         JButton reborn = Theme.button(t("ending.reborn", Fmt.num(nextMultiplier)), Theme.GOLD.darker());

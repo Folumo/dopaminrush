@@ -15,6 +15,9 @@ public final class Node {
     public double cost;
     public double income;     // currency per second once owned
     public double clickBonus; // added to each manual click once owned
+    public double offlineRate;  // share of income earned while the game is closed, per level (0.05 = 5%)
+    public double offlineHours; // extra hours the game keeps earning while closed, per level
+    public boolean calm;        // buying it clears the player's tolerance
     /** How many times it can be bought; each level adds the income and click bonus again. */
     public int maxLevel = 1;
     public int x, y;
